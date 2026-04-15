@@ -10,14 +10,14 @@ permissions:
   contents: write
 
 jobs:
-  build-macos-arm64:
+  build-macos:
     runs-on: macos-14  # Apple Silicon
     steps:
       - uses: actions/checkout@v4
 
       - uses: actions/setup-python@v5
         with:
-          python-version: '3.12'
+          python-version: '3.13'
 
       - name: Install dependencies
         run: |
@@ -49,45 +49,6 @@ jobs:
           name: ezsk-macos-arm64
           path: dist/ezsk-macos-arm64.dmg
 
-  build-macos-x64:
-    runs-on: macos-13  # Intel
-    steps:
-      - uses: actions/checkout@v4
-
-      - uses: actions/setup-python@v5
-        with:
-          python-version: '3.12'
-
-      - name: Install dependencies
-        run: |
-          pip install -e ".[web,verify,tray-macos,build]"
-
-      - name: Download slskd binary
-        run: |
-          python -c "from ezsk.slskd_manager import download_slskd; download_slskd(verbose=True)"
-
-      - name: Build with PyInstaller
-        run: |
-          pyinstaller build/ezsk.spec --noconfirm
-
-      - name: Bundle slskd binary
-        run: |
-          SLSKD_BIN="$(python -c "from ezsk.slskd_manager import _slskd_binary_path; print(_slskd_binary_path())")"
-          if [ -f "$SLSKD_BIN" ]; then
-            mkdir -p dist/ezsk.app/Contents/Resources/bin
-            cp "$SLSKD_BIN" dist/ezsk.app/Contents/Resources/bin/slskd
-            chmod +x dist/ezsk.app/Contents/Resources/bin/slskd
-          fi
-
-      - name: Create DMG
-        run: |
-          hdiutil create -volname ezsk -srcfolder dist/ezsk.app -ov dist/ezsk-macos-x64.dmg
-
-      - uses: actions/upload-artifact@v4
-        with:
-          name: ezsk-macos-x64
-          path: dist/ezsk-macos-x64.dmg
-
   build-windows:
     runs-on: windows-latest
     steps:
@@ -95,7 +56,7 @@ jobs:
 
       - uses: actions/setup-python@v5
         with:
-          python-version: '3.12'
+          python-version: '3.13'
 
       - name: Install dependencies
         run: |
@@ -129,7 +90,7 @@ jobs:
           path: ezsk-windows-x64.zip
 
   release:
-    needs: [build-macos-arm64, build-macos-x64, build-windows]
+    needs: [build-macos, build-windows]
     runs-on: ubuntu-latest
     if: startsWith(github.ref, 'refs/tags/v')
     steps:
@@ -144,5 +105,4 @@ jobs:
           generate_release_notes: true
           files: |
             artifacts/ezsk-macos-arm64/ezsk-macos-arm64.dmg
-            artifacts/ezsk-macos-x64/ezsk-macos-x64.dmg
             artifacts/ezsk-windows-x64/ezsk-windows-x64.zip
