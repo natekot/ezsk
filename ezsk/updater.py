@@ -13,7 +13,7 @@ from urllib.request import urlopen
 
 from ezsk.display import print_verbose
 
-GITHUB_REPO = "ezsk-dev/ezsk"
+GITHUB_REPO = "natekot/ezsk"
 CHECK_INTERVAL = 86400  # 24 hours
 
 

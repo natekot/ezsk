@@ -25,7 +25,7 @@ pip install ".[ai,web,verify]"
 
 ### Desktop app
 
-Download a pre-built `.app` (macOS) or `.exe` (Windows) from the [Releases](https://github.com/ezsk-dev/ezsk/releases) page. No Python required.
+Download a pre-built `.app` (macOS) or `.exe` (Windows) from the [Releases](https://github.com/natekot/ezsk/releases) page. No Python required.
 
 ## Quick start
 

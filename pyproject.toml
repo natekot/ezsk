@@ -37,10 +37,10 @@ build = ["pyinstaller>=6.0"]
 test = ["pytest>=8.0", "httpx>=0.27"]
 
 [project.urls]
-Homepage = "https://github.com/ezsk-dev/ezsk"
-Repository = "https://github.com/ezsk-dev/ezsk"
-Issues = "https://github.com/ezsk-dev/ezsk/issues"
-Changelog = "https://github.com/ezsk-dev/ezsk/blob/main/CHANGELOG.md"
+Homepage = "https://github.com/natekot/ezsk"
+Repository = "https://github.com/natekot/ezsk"
+Issues = "https://github.com/natekot/ezsk/issues"
+Changelog = "https://github.com/natekot/ezsk/blob/main/CHANGELOG.md"
 
 [project.scripts]
 ezsk = "ezsk.cli:main"

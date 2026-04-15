@@ -40,7 +40,7 @@ def test_checker_detects_update(monkeypatch):
     fake_response = json.dumps({
         "tag_name": "v0.2.0",
         "body": "New features",
-        "html_url": "https://github.com/ezsk-dev/ezsk/releases/tag/v0.2.0",
+        "html_url": "https://github.com/natekot/ezsk/releases/tag/v0.2.0",
     }).encode()
 
     mock_resp = MagicMock()
