@@ -1,0 +1,563 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>ezsk</title>
+<link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+
+<div class="update-banner" id="update-banner" style="display:none">
+  <span id="update-text"></span>
+  <a id="update-link" href="#" target="_blank" class="btn btn-sm" style="margin-left:0.5rem">Download</a>
+  <button class="panel-close" onclick="document.getElementById('update-banner').style.display='none'">&times;</button>
+</div>
+
+<header>
+  <h1>ezsk</h1>
+  <span class="running-badge" id="running-badge">Running</span>
+</header>
+
+<div class="cards" id="cards">
+  <div class="card" data-status="completed"><div class="num" id="count-completed">0</div><div class="label">Completed</div></div>
+  <div class="card" data-status="failed"><div class="num" id="count-failed">0</div><div class="label">Failed</div></div>
+  <div class="card" data-status="in_progress"><div class="num" id="count-in-progress">0</div><div class="label">In Progress</div></div>
+  <div class="card" data-status="queued"><div class="num" id="count-queued">0</div><div class="label">Queued</div></div>
+  <div class="card" data-status="dead"><div class="num" id="count-dead">0</div><div class="label">Dead</div></div>
+</div>
+
+<div class="actions">
+  <button class="btn" id="btn-add" onclick="togglePanel('add-panel')">Add Queries</button>
+  <button class="btn btn-success" id="btn-retry" onclick="retryFailed()">Retry Failed</button>
+  <button class="btn btn-danger" id="btn-cancel" onclick="cancelBatch()" style="display:none">Cancel</button>
+  <button class="btn" id="btn-files" onclick="togglePanel('files-panel')">Files</button>
+  <button class="btn" id="btn-config" onclick="togglePanel('config-panel')">Config</button>
+</div>
+
+<!-- Files Panel -->
+<div class="panel" id="files-panel">
+  <h2>Watch Dir Files <button class="panel-close" onclick="togglePanel('files-panel')">&times;</button></h2>
+  <div id="files-status"></div>
+  <div id="files-upload" style="margin-bottom:1rem">
+    <div class="upload-area" id="upload-area">
+      <input type="file" id="file-input" multiple style="display:none">
+      <span class="upload-label">Drop files here or <a href="#" onclick="document.getElementById('file-input').click();return false">browse</a></span>
+    </div>
+  </div>
+  <table class="files-table" id="files-table" style="display:none">
+    <thead><tr><th>File</th><th>Status</th><th>Tracks</th><th>Actions</th></tr></thead>
+    <tbody id="files-body"></tbody>
+  </table>
+  <div id="files-empty" class="empty-state" style="display:none"></div>
+  <div style="margin-top:0.75rem">
+    <button class="btn btn-success" id="btn-run-all" onclick="runAllFiles()">Run All</button>
+  </div>
+</div>
+
+<!-- Add Queries Panel -->
+<div class="panel" id="add-panel">
+  <h2>Add Queries <button class="panel-close" onclick="togglePanel('add-panel')">&times;</button></h2>
+  <textarea id="query-input" placeholder="One query per line, e.g.&#10;Daft Punk - Around the World&#10;Riva Starr - How It Feels"></textarea>
+  <div style="margin-top:0.75rem">
+    <button class="btn btn-success" onclick="submitQueries()">Start</button>
+  </div>
+</div>
+
+<!-- Config Panel -->
+<div class="panel" id="config-panel">
+  <h2>Configuration <button class="panel-close" onclick="togglePanel('config-panel')">&times;</button></h2>
+  <div class="config-grid" id="config-form"></div>
+  <div style="margin-top:1rem">
+    <button class="btn btn-success" onclick="saveConfig()">Save</button>
+  </div>
+</div>
+
+<div class="filter-row">
+  <input type="text" id="filter" placeholder="Filter by query..." autocomplete="off">
+</div>
+
+<table>
+  <thead>
+    <tr>
+      <th data-col="0">Query</th>
+      <th data-col="1">Status</th>
+      <th data-col="2">Attempts</th>
+      <th data-col="3">Last Attempt</th>
+      <th data-col="4">Error</th>
+    </tr>
+  </thead>
+  <tbody id="table-body">
+    <tr><td colspan="5" class="empty-state">Connecting...</td></tr>
+  </tbody>
+</table>
+
+<div class="toast" id="toast"></div>
+
+<script>
+(function() {
+  // State
+  var entries = [];
+  var counts = {};
+  var isRunning = false;
+  var activeStatus = 'all';
+  var filterText = '';
+  var sortCol = -1;
+  var sortAsc = true;
+  var configData = null;
+  var filesData = [];
+  var batchTotal = 0;
+  var batchRemaining = 0;
+
+  // URL hash persistence
+  function readHash() {
+    var h = location.hash.slice(1), params = {};
+    h.split('&').forEach(function(p) {
+      var kv = p.split('=');
+      if (kv[0]) params[kv[0]] = decodeURIComponent(kv[1] || '');
+    });
+    return params;
+  }
+  function writeHash() {
+    var parts = [];
+    if (activeStatus !== 'all') parts.push('status=' + encodeURIComponent(activeStatus));
+    if (filterText) parts.push('q=' + encodeURIComponent(filterText));
+    if (sortCol >= 0) parts.push('sort=' + sortCol + (sortAsc ? 'a' : 'd'));
+    location.hash = parts.length ? parts.join('&') : '';
+  }
+
+  var params = readHash();
+  activeStatus = params.status || 'all';
+  filterText = params.q || '';
+  if (params.sort) { sortCol = parseInt(params.sort); sortAsc = params.sort.slice(-1) !== 'd'; }
+
+  // Format timestamp
+  function fmtTime(iso) {
+    if (!iso) return '';
+    try {
+      var d = new Date(iso);
+      return d.toLocaleDateString('en-US', {month:'short',day:'numeric'}) + ', ' +
+             d.toLocaleTimeString('en-US', {hour:'numeric',minute:'2-digit'});
+    } catch(e) { return iso; }
+  }
+
+  // Escape HTML
+  function esc(s) {
+    var el = document.createElement('span');
+    el.textContent = s || '';
+    return el.innerHTML;
+  }
+
+  // Render table
+  function renderTable() {
+    var rows = [];
+    entries.forEach(function(e) {
+      var status = e.status || 'unknown';
+      var badgeCls = {completed:'badge-ok', failed:'badge-fail', searching:'badge-search', downloading:'badge-dl', queued:'badge-queued', dead:'badge-dead'}[status] || 'badge-other';
+      var attempts = e.attempts || 0;
+      var lastAttempt = e.last_attempt || '';
+      var progressHtml = '';
+      if (status === 'downloading' && e.total_size) {
+        var pct = Math.min(100, Math.round((e.progress || 0) / e.total_size * 100));
+        progressHtml = "<div class='progress'><div class='progress-bar' style='width:" + pct + "%'></div></div><span class='progress-pct'>" + pct + "%</span>";
+      }
+      var searchQuery = e.search_query || '';
+      var queryHtml = esc(e.query || '');
+      if (searchQuery && searchQuery !== (e.query || '')) {
+        queryHtml += "<div class='search-query'>" + esc(searchQuery) + "</div>";
+      }
+      if (e.local_path && status === 'completed') {
+        var fname = e.local_path.split('/').pop();
+        queryHtml += "<div class='local-path'>" + esc(fname) + "</div>";
+      }
+      rows.push({
+        status: status,
+        html: "<tr class='state-row' data-status='" + esc(status) + "'>" +
+          "<td>" + queryHtml + "</td>" +
+          "<td><span class='badge " + badgeCls + "'>" + esc(status) + "</span>" + progressHtml + "</td>" +
+          "<td data-sort-value='" + attempts + "'>" + attempts + "</td>" +
+          "<td data-sort-value='" + esc(lastAttempt) + "'>" + esc(fmtTime(lastAttempt)) + "</td>" +
+          "<td>" + esc(e.error || '') + "</td>" +
+          "</tr>",
+        query: (e.query || '').toLowerCase(),
+        attempts: attempts,
+        lastAttempt: lastAttempt,
+        error: e.error || ''
+      });
+    });
+
+    // Sort
+    if (sortCol >= 0) {
+      rows.sort(function(a, b) {
+        var av, bv;
+        if (sortCol === 0) { av = a.query; bv = b.query; }
+        else if (sortCol === 1) { av = a.status; bv = b.status; }
+        else if (sortCol === 2) { return sortAsc ? a.attempts - b.attempts : b.attempts - a.attempts; }
+        else if (sortCol === 3) { av = a.lastAttempt; bv = b.lastAttempt; }
+        else { av = a.error; bv = b.error; }
+        return sortAsc ? (av||'').localeCompare(bv||'') : (bv||'').localeCompare(av||'');
+      });
+    }
+
+    // Filter
+    var html = '';
+    var visible = 0;
+    rows.forEach(function(r) {
+      var matchStatus = activeStatus === 'all' || r.status === activeStatus ||
+        (activeStatus === 'in_progress' && (r.status === 'searching' || r.status === 'downloading'));
+      var matchText = !filterText || r.query.includes(filterText) || (r.error||'').toLowerCase().includes(filterText);
+      if (matchStatus && matchText) {
+        html += r.html;
+        visible++;
+      }
+    });
+
+    document.getElementById('table-body').innerHTML = html || "<tr><td colspan='5' class='empty-state'>No entries</td></tr>";
+  }
+
+  // Update cards
+  function updateCards() {
+    var c = counts;
+    document.getElementById('count-completed').textContent = c.completed || 0;
+    document.getElementById('count-failed').textContent = c.failed || 0;
+    document.getElementById('count-in-progress').textContent = (c.searching || 0) + (c.downloading || 0);
+    document.getElementById('count-queued').textContent = c.queued || 0;
+    document.getElementById('count-dead').textContent = c.dead || 0;
+
+    document.querySelectorAll('.card[data-status]').forEach(function(card) {
+      card.classList.toggle('active', card.getAttribute('data-status') === activeStatus);
+    });
+  }
+
+  // Update running state
+  function updateRunning() {
+    var badge = document.getElementById('running-badge');
+    var cancelBtn = document.getElementById('btn-cancel');
+    badge.classList.toggle('active', isRunning);
+    badge.textContent = 'Running';
+    cancelBtn.style.display = isRunning ? '' : 'none';
+    document.getElementById('btn-retry').disabled = isRunning;
+    document.getElementById('btn-run-all').disabled = isRunning;
+    // Disable per-file run buttons
+    document.querySelectorAll('.btn-file-run').forEach(function(b) { b.disabled = isRunning; });
+  }
+
+  // Card click
+  document.querySelectorAll('.card[data-status]').forEach(function(card) {
+    card.addEventListener('click', function() {
+      var status = card.getAttribute('data-status');
+      activeStatus = (activeStatus === status) ? 'all' : status;
+      updateCards();
+      renderTable();
+      writeHash();
+    });
+  });
+
+  // Badge click (delegate)
+  document.getElementById('table-body').addEventListener('click', function(e) {
+    if (e.target.classList.contains('badge')) {
+      var status = e.target.textContent.trim();
+      activeStatus = (activeStatus === status) ? 'all' : status;
+      updateCards();
+      renderTable();
+      writeHash();
+    }
+  });
+
+  // Filter input
+  var filterInput = document.getElementById('filter');
+  filterInput.value = filterText;
+  filterInput.addEventListener('input', function() {
+    filterText = this.value.toLowerCase();
+    renderTable();
+    writeHash();
+  });
+
+  // Sort headers
+  document.querySelectorAll('th[data-col]').forEach(function(th) {
+    th.addEventListener('click', function() {
+      var col = parseInt(th.getAttribute('data-col'));
+      if (sortCol === col) { sortAsc = !sortAsc; }
+      else { sortCol = col; sortAsc = true; }
+      document.querySelectorAll('th').forEach(function(h) {
+        h.classList.remove('sort-asc', 'sort-desc');
+      });
+      th.classList.add(sortAsc ? 'sort-asc' : 'sort-desc');
+      renderTable();
+      writeHash();
+    });
+  });
+
+  // SSE
+  function connectSSE() {
+    var es = new EventSource('/api/events');
+
+    es.addEventListener('state', function(e) {
+      var data = JSON.parse(e.data);
+      entries = data.entries || [];
+      counts = data.counts || {};
+      batchTotal = data.batch_total || 0;
+      batchRemaining = data.batch_remaining || 0;
+      if (data.running !== undefined) {
+        isRunning = data.running;
+        updateRunning();
+      }
+      updateCards();
+      renderTable();
+    });
+
+    es.addEventListener('running', function(e) {
+      var data = JSON.parse(e.data);
+      isRunning = data.running;
+      updateRunning();
+    });
+
+    es.addEventListener('files', function(e) {
+      var data = JSON.parse(e.data);
+      filesData = data.files || [];
+      renderFileList();
+    });
+
+    es.addEventListener('ping', function() {});
+
+    es.onerror = function() {
+      es.close();
+      setTimeout(connectSSE, 3000);
+    };
+  }
+  connectSSE();
+
+  // Restore sort indicator
+  if (sortCol >= 0) {
+    var th = document.querySelector('th[data-col="' + sortCol + '"]');
+    if (th) th.classList.add(sortAsc ? 'sort-asc' : 'sort-desc');
+  }
+
+  // Config
+  var configFields = [
+    {section:'slskd', key:'url', label:'slskd URL'},
+    {section:'slskd', key:'api_key', label:'API Key', type:'password'},
+    {section:'slskd', key:'downloads_dir', label:'Downloads Dir'},
+    {section:'slskd', key:'shared_dir', label:'Shared Dir'},
+    {section:'output', key:'dir', label:'Output Dir'},
+    {section:'output', key:'pattern', label:'Filename Pattern'},
+    {section:'output', key:'format', label:'Preferred Format'},
+    {section:'output', key:'min_bitrate', label:'Min Bitrate', type:'number'},
+    {section:'output', key:'min_bit_depth', label:'Min Bit Depth', type:'number'},
+    {section:'docker', key:'soulseek_username', label:'Soulseek Username'},
+    {section:'anthropic', key:'api_key', label:'Anthropic API Key', type:'password'},
+    {section:'anthropic', key:'watch_dir', label:'Watch Dir'},
+  ];
+
+  window.togglePanel = function(id) {
+    var panel = document.getElementById(id);
+    panel.classList.toggle('open');
+    if (id === 'config-panel' && panel.classList.contains('open') && !configData) {
+      loadConfig();
+    }
+  };
+
+  function loadConfig() {
+    fetch('/api/config').then(function(r) { return r.json(); }).then(function(data) {
+      configData = data;
+      var form = document.getElementById('config-form');
+      form.innerHTML = '';
+      configFields.forEach(function(f) {
+        var val = (data[f.section] || {})[f.key] || '';
+        var inputType = f.type || 'text';
+        form.innerHTML += '<div class="config-field"><label>' + f.label + '</label>' +
+          '<input type="' + inputType + '" data-section="' + f.section + '" data-key="' + f.key + '" value="' + esc(String(val)) + '"></div>';
+      });
+    });
+  }
+
+  window.saveConfig = function() {
+    var inputs = document.querySelectorAll('#config-form input');
+    var data = {};
+    inputs.forEach(function(input) {
+      var section = input.getAttribute('data-section');
+      var key = input.getAttribute('data-key');
+      if (!data[section]) data[section] = {};
+      var val = input.value;
+      if (input.type === 'number') val = parseInt(val) || 0;
+      data[section][key] = val;
+    });
+    fetch('/api/config', {
+      method: 'PUT',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify(data)
+    }).then(function(r) {
+      if (r.ok) toast('Config saved');
+      else toast('Save failed');
+    });
+  };
+
+  window.submitQueries = function() {
+    var text = document.getElementById('query-input').value.trim();
+    if (!text) return;
+    var queries = text.split('\n').map(function(q) { return q.trim(); }).filter(Boolean);
+    fetch('/api/run', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({queries: queries})
+    }).then(function(r) { return r.json(); }).then(function(data) {
+      if (data.ok) {
+        toast((data.queued ? 'Queued ' : 'Started ') + data.count + ' queries');
+        document.getElementById('query-input').value = '';
+        togglePanel('add-panel');
+      } else {
+        toast(data.error || 'Failed');
+      }
+    });
+  };
+
+  window.retryFailed = function() {
+    fetch('/api/retry', {method: 'POST'}).then(function(r) { return r.json(); }).then(function(data) {
+      if (data.ok) {
+        toast(data.count ? 'Retrying ' + data.count + ' queries' : 'No failed queries');
+      } else {
+        toast(data.error || 'Failed');
+      }
+    });
+  };
+
+  window.cancelBatch = function() {
+    fetch('/api/cancel', {method: 'POST'}).then(function() {
+      toast('Cancelling...');
+    });
+  };
+
+  // Files panel
+  function renderFileList() {
+    var table = document.getElementById('files-table');
+    var empty = document.getElementById('files-empty');
+    var body = document.getElementById('files-body');
+
+    if (!filesData.length) {
+      table.style.display = 'none';
+      empty.style.display = 'block';
+      empty.textContent = 'No files in watch directory';
+      return;
+    }
+
+    table.style.display = '';
+    empty.style.display = 'none';
+    var html = '';
+    filesData.forEach(function(f) {
+      var badgeCls = {cached:'badge-ok', unparsed:'badge-other', parsing:'badge-search', error:'badge-fail'}[f.status] || 'badge-other';
+      var tracks = f.track_count != null ? f.track_count : '-';
+      var actions = '';
+      if (f.status === 'cached') {
+        actions = '<button class="btn btn-sm btn-file-run" onclick="runFile(\'' + esc(f.name) + '\')"' + (isRunning ? ' disabled' : '') + '>Run</button> ';
+      }
+      if (f.status !== 'parsing') {
+        actions += '<button class="btn btn-sm" onclick="parseFile(\'' + esc(f.name) + '\')">Parse</button> ';
+        actions += '<button class="btn btn-sm btn-danger" onclick="deleteFile(\'' + esc(f.name) + '\')">Remove</button>';
+      }
+      html += '<tr>' +
+        '<td>' + esc(f.name) + '</td>' +
+        '<td><span class="badge ' + badgeCls + (f.status === 'parsing' ? ' badge-pulse' : '') + '">' + esc(f.status) + '</span></td>' +
+        '<td>' + tracks + '</td>' +
+        '<td class="file-actions">' + actions + '</td>' +
+        '</tr>';
+    });
+    body.innerHTML = html;
+  }
+
+  // Drag and drop — auto-upload on drop or file pick
+  var uploadArea = document.getElementById('upload-area');
+  var fileInput = document.getElementById('file-input');
+
+  function doUpload(files) {
+    if (!files.length) return;
+    var formData = new FormData();
+    for (var i = 0; i < files.length; i++) {
+      formData.append('files', files[i]);
+    }
+    toast('Uploading ' + files.length + ' file' + (files.length > 1 ? 's' : '') + '...');
+    fetch('/api/files/upload', {method: 'POST', body: formData})
+      .then(function(r) { return r.json(); })
+      .then(function(data) {
+        if (data.ok) {
+          toast('Uploaded ' + data.uploaded.length + ' file' + (data.uploaded.length > 1 ? 's' : ''));
+        } else {
+          toast(data.error || 'Upload failed');
+        }
+        fileInput.value = '';
+      });
+  }
+
+  uploadArea.addEventListener('dragover', function(e) {
+    e.preventDefault();
+    uploadArea.classList.add('dragover');
+  });
+  uploadArea.addEventListener('dragleave', function() {
+    uploadArea.classList.remove('dragover');
+  });
+  uploadArea.addEventListener('drop', function(e) {
+    e.preventDefault();
+    uploadArea.classList.remove('dragover');
+    doUpload(e.dataTransfer.files);
+  });
+  fileInput.addEventListener('change', function() {
+    doUpload(fileInput.files);
+  });
+
+  window.parseFile = function(name) {
+    fetch('/api/files/' + encodeURIComponent(name) + '/parse', {method: 'POST'})
+      .then(function(r) { return r.json(); })
+      .then(function(data) {
+        if (!data.ok) toast(data.error || 'Parse failed');
+      });
+  };
+
+  window.runFile = function(name) {
+    fetch('/api/files/' + encodeURIComponent(name) + '/run', {method: 'POST'})
+      .then(function(r) { return r.json(); })
+      .then(function(data) {
+        if (data.ok) toast('Started ' + data.count + ' queries from ' + name);
+        else toast(data.error || 'Failed');
+      });
+  };
+
+  window.deleteFile = function(name) {
+    fetch('/api/files/' + encodeURIComponent(name), {method: 'DELETE'})
+      .then(function(r) { return r.json(); })
+      .then(function(data) {
+        if (data.ok) toast('Removed ' + name);
+      });
+  };
+
+  window.runAllFiles = function() {
+    fetch('/api/files/run-all', {method: 'POST'})
+      .then(function(r) { return r.json(); })
+      .then(function(data) {
+        if (data.ok) toast('Running all files...');
+        else toast(data.error || 'Failed');
+      });
+  };
+
+  // Update checker
+  function checkUpdate() {
+    fetch('/api/update').then(function(r) { return r.json(); }).then(function(data) {
+      if (data.update_available) {
+        var banner = document.getElementById('update-banner');
+        document.getElementById('update-text').textContent =
+          'Update available: v' + data.latest_version + ' (current: v' + data.current_version + ')';
+        document.getElementById('update-link').href = data.download_url || '#';
+        banner.style.display = '';
+      }
+    }).catch(function() {});
+  }
+  setTimeout(checkUpdate, 8000);
+
+  function toast(msg) {
+    var el = document.getElementById('toast');
+    el.textContent = msg;
+    el.classList.add('show');
+    setTimeout(function() { el.classList.remove('show'); }, 3000);
+  }
+})();
+</script>
+</body>
+</html>

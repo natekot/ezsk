@@ -1,0 +1,390 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>ezsk — Setup</title>
+<link rel="stylesheet" href="/static/style.css">
+<style>
+.setup {
+  max-width: 480px;
+  margin: 2rem auto;
+  padding: 0 1rem;
+}
+.setup h1 {
+  text-align: center;
+  margin-bottom: 0.25rem;
+}
+.setup .subtitle {
+  text-align: center;
+  color: #888;
+  margin-bottom: 2rem;
+}
+.setup .step {
+  display: none;
+}
+.setup .step.active {
+  display: block;
+}
+.setup h2 {
+  font-size: 1.1rem;
+  margin-bottom: 1rem;
+}
+.setup .field {
+  margin-bottom: 1rem;
+}
+.setup label {
+  display: block;
+  margin-bottom: 0.25rem;
+  font-weight: 600;
+  font-size: 0.9rem;
+}
+.setup input[type="text"],
+.setup input[type="password"],
+.setup input[type="number"] {
+  width: 100%;
+  padding: 0.5rem;
+  border: 1px solid #444;
+  border-radius: 4px;
+  background: #1a1a2e;
+  color: #e0e0e0;
+  font-size: 0.9rem;
+  box-sizing: border-box;
+}
+.setup input:focus {
+  outline: none;
+  border-color: #5c7cfa;
+}
+.setup .hint {
+  font-size: 0.8rem;
+  color: #888;
+  margin-top: 0.25rem;
+}
+.setup .nav {
+  display: flex;
+  justify-content: space-between;
+  margin-top: 1.5rem;
+}
+.setup .nav .btn {
+  min-width: 100px;
+}
+.setup .progress-dots {
+  display: flex;
+  justify-content: center;
+  gap: 0.5rem;
+  margin-bottom: 1.5rem;
+}
+.setup .dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: #333;
+}
+.setup .dot.active {
+  background: #5c7cfa;
+}
+.setup .dot.done {
+  background: #51cf66;
+}
+.setup .status-msg {
+  text-align: center;
+  margin-top: 1rem;
+  padding: 0.75rem;
+  border-radius: 4px;
+  display: none;
+}
+.setup .status-msg.show {
+  display: block;
+}
+.setup .status-msg.ok {
+  background: rgba(81,207,102,0.15);
+  color: #51cf66;
+}
+.setup .status-msg.err {
+  background: rgba(255,107,107,0.15);
+  color: #ff6b6b;
+}
+.setup .status-msg.info {
+  background: rgba(92,124,250,0.15);
+  color: #5c7cfa;
+}
+.setup .option-cards {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+.setup .option-card {
+  padding: 0.75rem 1rem;
+  border: 2px solid #333;
+  border-radius: 8px;
+  cursor: pointer;
+  transition: border-color 0.15s;
+}
+.setup .option-card:hover {
+  border-color: #555;
+}
+.setup .option-card.selected {
+  border-color: #5c7cfa;
+  background: rgba(92,124,250,0.08);
+}
+.setup .option-card h3 {
+  margin: 0 0 0.25rem 0;
+  font-size: 0.95rem;
+}
+.setup .option-card p {
+  margin: 0;
+  font-size: 0.8rem;
+  color: #888;
+}
+.spinner {
+  display: inline-block;
+  width: 16px;
+  height: 16px;
+  border: 2px solid #888;
+  border-top-color: #5c7cfa;
+  border-radius: 50%;
+  animation: spin 0.8s linear infinite;
+  vertical-align: middle;
+  margin-right: 0.5rem;
+}
+@keyframes spin {
+  to { transform: rotate(360deg); }
+}
+</style>
+</head>
+<body>
+
+<div class="setup">
+  <h1>ezsk</h1>
+  <p class="subtitle">Soulseek download automation</p>
+
+  <div class="progress-dots" id="dots">
+    <div class="dot active"></div>
+    <div class="dot"></div>
+    <div class="dot"></div>
+    <div class="dot"></div>
+  </div>
+
+  <!-- Step 1: slskd mode -->
+  <div class="step active" id="step-0">
+    <h2>How should ezsk connect to Soulseek?</h2>
+    <div class="option-cards">
+      <div class="option-card selected" data-mode="managed" onclick="selectMode(this)">
+        <h3>Automatic (recommended)</h3>
+        <p>ezsk downloads and manages slskd for you. No setup needed.</p>
+      </div>
+      <div class="option-card" data-mode="external" onclick="selectMode(this)">
+        <h3>External slskd</h3>
+        <p>Connect to an slskd instance you're already running.</p>
+      </div>
+    </div>
+    <div class="nav">
+      <span></span>
+      <button class="btn btn-success" onclick="nextStep()">Next</button>
+    </div>
+  </div>
+
+  <!-- Step 2: Credentials -->
+  <div class="step" id="step-1">
+    <h2>Soulseek Account</h2>
+    <p class="hint" style="margin-bottom:1rem">Create one at <a href="https://www.slsknet.org" target="_blank" style="color:#5c7cfa">slsknet.org</a> if you don't have one.</p>
+
+    <!-- Managed mode fields -->
+    <div id="managed-fields">
+      <div class="field">
+        <label>Soulseek Username</label>
+        <input type="text" id="slsk-username" autocomplete="username">
+      </div>
+      <div class="field">
+        <label>Soulseek Password</label>
+        <input type="password" id="slsk-password" autocomplete="current-password">
+      </div>
+    </div>
+
+    <!-- External mode fields -->
+    <div id="external-fields" style="display:none">
+      <div class="field">
+        <label>slskd URL</label>
+        <input type="text" id="slskd-url" value="http://localhost:5030">
+      </div>
+      <div class="field">
+        <label>slskd API Key</label>
+        <input type="password" id="slskd-api-key">
+        <p class="hint">Find in your slskd.yml under web > authentication > api_keys</p>
+      </div>
+      <div class="field">
+        <label>slskd Downloads Directory</label>
+        <input type="text" id="slskd-downloads-dir">
+        <p class="hint">The folder where slskd saves downloaded files</p>
+      </div>
+    </div>
+
+    <div class="nav">
+      <button class="btn" onclick="prevStep()">Back</button>
+      <button class="btn btn-success" onclick="nextStep()">Next</button>
+    </div>
+  </div>
+
+  <!-- Step 3: Output -->
+  <div class="step" id="step-2">
+    <h2>Output Settings</h2>
+    <div class="field">
+      <label>Music Directory</label>
+      <input type="text" id="output-dir" placeholder="~/Music/soulseek">
+      <p class="hint">Where ezsk saves your downloaded music</p>
+    </div>
+    <div class="field">
+      <label>Preferred Format</label>
+      <div class="option-cards" style="flex-direction:row; gap:0.5rem">
+        <div class="option-card selected" data-format="flac" onclick="selectFormat(this)" style="flex:1; text-align:center">
+          <h3>FLAC</h3>
+          <p>Lossless</p>
+        </div>
+        <div class="option-card" data-format="mp3" onclick="selectFormat(this)" style="flex:1; text-align:center">
+          <h3>MP3</h3>
+          <p>320kbps</p>
+        </div>
+        <div class="option-card" data-format="any" onclick="selectFormat(this)" style="flex:1; text-align:center">
+          <h3>Any</h3>
+          <p>Best available</p>
+        </div>
+      </div>
+    </div>
+    <div class="nav">
+      <button class="btn" onclick="prevStep()">Back</button>
+      <button class="btn btn-success" onclick="nextStep()">Finish</button>
+    </div>
+  </div>
+
+  <!-- Step 4: Installing -->
+  <div class="step" id="step-3">
+    <h2>Setting Up</h2>
+    <div id="setup-status" class="status-msg show info">
+      <span class="spinner"></span> Saving configuration...
+    </div>
+    <div id="setup-done" style="display:none; text-align:center; margin-top:2rem">
+      <p style="font-size:1.1rem; color:#51cf66; font-weight:600">Setup complete!</p>
+      <p style="color:#888; margin-top:0.5rem">Redirecting to dashboard...</p>
+    </div>
+  </div>
+</div>
+
+<script>
+(function() {
+  var currentStep = 0;
+  var totalSteps = 4;
+  var mode = 'managed';
+  var format = 'flac';
+
+  window.selectMode = function(el) {
+    document.querySelectorAll('#step-0 .option-card').forEach(function(c) { c.classList.remove('selected'); });
+    el.classList.add('selected');
+    mode = el.getAttribute('data-mode');
+  };
+
+  window.selectFormat = function(el) {
+    document.querySelectorAll('#step-2 .option-card').forEach(function(c) { c.classList.remove('selected'); });
+    el.classList.add('selected');
+    format = el.getAttribute('data-format');
+  };
+
+  function showStep(n) {
+    document.querySelectorAll('.step').forEach(function(s) { s.classList.remove('active'); });
+    document.getElementById('step-' + n).classList.add('active');
+    var dots = document.querySelectorAll('.dot');
+    dots.forEach(function(d, i) {
+      d.classList.toggle('active', i === n);
+      d.classList.toggle('done', i < n);
+    });
+
+    // Toggle credential fields
+    if (n === 1) {
+      document.getElementById('managed-fields').style.display = mode === 'managed' ? '' : 'none';
+      document.getElementById('external-fields').style.display = mode === 'external' ? '' : 'none';
+    }
+  }
+
+  window.nextStep = function() {
+    if (currentStep === totalSteps - 2) {
+      // Last real step — submit
+      currentStep++;
+      showStep(currentStep);
+      doSetup();
+      return;
+    }
+    if (currentStep < totalSteps - 1) {
+      currentStep++;
+      showStep(currentStep);
+    }
+  };
+
+  window.prevStep = function() {
+    if (currentStep > 0) {
+      currentStep--;
+      showStep(currentStep);
+    }
+  };
+
+  function doSetup() {
+    var statusEl = document.getElementById('setup-status');
+    var doneEl = document.getElementById('setup-done');
+
+    var payload = {mode: mode, format: format};
+
+    if (mode === 'managed') {
+      payload.soulseek_username = document.getElementById('slsk-username').value.trim();
+      payload.soulseek_password = document.getElementById('slsk-password').value;
+    } else {
+      payload.url = document.getElementById('slskd-url').value.trim();
+      payload.api_key = document.getElementById('slskd-api-key').value.trim();
+      payload.downloads_dir = document.getElementById('slskd-downloads-dir').value.trim();
+    }
+
+    payload.output_dir = document.getElementById('output-dir').value.trim();
+
+    fetch('/api/setup', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify(payload)
+    }).then(function(r) { return r.json(); }).then(function(data) {
+      if (data.ok) {
+        if (data.status) {
+          statusEl.className = 'status-msg show info';
+          statusEl.innerHTML = '<span class="spinner"></span> ' + data.status;
+        }
+        pollSetup();
+      } else {
+        statusEl.className = 'status-msg show err';
+        statusEl.textContent = data.error || 'Setup failed';
+      }
+    }).catch(function(e) {
+      statusEl.className = 'status-msg show err';
+      statusEl.textContent = 'Connection error: ' + e.message;
+    });
+  }
+
+  function pollSetup() {
+    var statusEl = document.getElementById('setup-status');
+    var doneEl = document.getElementById('setup-done');
+
+    var interval = setInterval(function() {
+      fetch('/api/setup/status').then(function(r) { return r.json(); }).then(function(data) {
+        if (data.done) {
+          clearInterval(interval);
+          statusEl.style.display = 'none';
+          doneEl.style.display = '';
+          setTimeout(function() { window.location.href = '/'; }, 2000);
+        } else if (data.error) {
+          clearInterval(interval);
+          statusEl.className = 'status-msg show err';
+          statusEl.textContent = data.error;
+        } else if (data.status) {
+          statusEl.innerHTML = '<span class="spinner"></span> ' + data.status;
+        }
+      }).catch(function() {});
+    }, 1500);
+  }
+})();
+</script>
+</body>
+</html>

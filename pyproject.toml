@@ -1,0 +1,54 @@
+[project]
+name = "ezsk"
+version = "0.1.0"
+description = "Soulseek download automation via slskd"
+readme = "README.md"
+license = {file = "LICENSE"}
+requires-python = ">=3.11"
+keywords = ["soulseek", "music", "download", "automation", "slskd"]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: End Users/Desktop",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: MacOS",
+    "Operating System :: Microsoft :: Windows",
+    "Operating System :: POSIX :: Linux",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: Multimedia :: Sound/Audio",
+]
+dependencies = [
+    "mutagen>=1.47",
+    "platformdirs>=4.0",
+    "slskd-api>=0.2.0",
+    "tqdm>=4.0",
+]
+
+[project.optional-dependencies]
+ai = ["anthropic>=0.40.0"]
+docker = ["docker>=7.0"]
+verify = ["soundfile>=0.12", "scipy>=1.11", "numpy>=1.24"]
+web = ["starlette>=0.40", "uvicorn[standard]>=0.30", "sse-starlette>=2.0", "python-multipart>=0.0.9"]
+tray-macos = ["rumps>=0.4"]
+tray-windows = ["pystray>=0.19", "Pillow>=10.0"]
+build = ["pyinstaller>=6.0"]
+test = ["pytest>=8.0", "httpx>=0.27"]
+
+[project.urls]
+Homepage = "https://github.com/ezsk-dev/ezsk"
+Repository = "https://github.com/ezsk-dev/ezsk"
+Issues = "https://github.com/ezsk-dev/ezsk/issues"
+Changelog = "https://github.com/ezsk-dev/ezsk/blob/main/CHANGELOG.md"
+
+[project.scripts]
+ezsk = "ezsk.cli:main"
+ezsk-desktop = "ezsk.desktop:main"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
