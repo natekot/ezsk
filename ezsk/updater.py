@@ -21,7 +21,8 @@ def current_version() -> str:
     try:
         return pkg_version("ezsk")
     except Exception:
-        return "0.0.0"
+        from ezsk import __version__
+        return __version__
 
 
 def _parse_version(v: str) -> tuple[int, ...]:
