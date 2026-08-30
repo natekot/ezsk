@@ -4,9 +4,12 @@ import os
 import re
 from ezsk.normalize import normalize_query
 
-INDEX_VERSION = 1
+INDEX_VERSION = 2
 AUDIO_EXTENSIONS = {".flac", ".mp3", ".ogg", ".opus", ".m4a", ".aac", ".wav", ".wma", ".ape", ".alac"}
 MIN_TOKENS = 2  # guard against false positives from single-word queries
+
+# Files we never want to treat as audio even if scanned by accident
+_SKIP_FILES = {".ezsk_index.json", "queued.txt", "dead.txt"}
 
 
 def _index_path(output_dir: str) -> str:
@@ -21,16 +24,54 @@ def _normalize_for_index(text: str) -> str:
     return re.sub(r"\s+", " ", n).strip()
 
 
+def _tag_key_for(path: str) -> str | None:
+    """Read embedded artist/title tags and produce an index key.
+
+    Used as a fallback when the filename stem doesn't carry artist+title.
+    Returns None if mutagen is unavailable, the file can't be read, or tags
+    are missing.
+    """
+    try:
+        import mutagen
+    except ImportError:
+        return None
+    try:
+        f = mutagen.File(path, easy=True)
+    except Exception:
+        return None
+    if f is None:
+        return None
+    artist = (f.get("artist", [""])[0] or "").strip()
+    title = (f.get("title", [""])[0] or "").strip()
+    if not artist or not title:
+        return None
+    return _normalize_for_index(f"{artist} {title}")
+
+
 def build_index(output_dir: str) -> dict[str, str]:
-    """Full scan of output_dir → {normalized_key: file_path}."""
+    """Recursive scan of output_dir → {normalized_key: file_path}.
+
+    Each audio file contributes its filename-derived key. When the filename
+    stem doesn't already contain ' - ' (i.e., it doesn't follow the
+    `{artist} - {title}` pattern ezsk produces), we additionally read the
+    embedded tags and add a tag-derived key pointing to the same path.
+    """
     index: dict[str, str] = {}
     if not os.path.isdir(output_dir):
         return index
-    for fname in os.listdir(output_dir):
-        stem, ext = os.path.splitext(fname)
-        if ext.lower() not in AUDIO_EXTENSIONS:
-            continue
-        index[_normalize_for_index(stem)] = os.path.join(output_dir, fname)
+    for root, _dirs, files in os.walk(output_dir):
+        for fname in files:
+            if fname in _SKIP_FILES:
+                continue
+            stem, ext = os.path.splitext(fname)
+            if ext.lower() not in AUDIO_EXTENSIONS:
+                continue
+            path = os.path.join(root, fname)
+            index[_normalize_for_index(stem)] = path
+            if " - " not in stem:
+                tag_key = _tag_key_for(path)
+                if tag_key:
+                    index.setdefault(tag_key, path)
     return index
 
 
@@ -61,6 +102,12 @@ def index_add(index: dict[str, str], output_dir: str, query: str, file_path: str
     save_index(output_dir, index)
 
 
+def index_remove(index: dict[str, str], output_dir: str, query: str) -> None:
+    """Drop a query's entry from the in-memory index and persist if changed."""
+    if index.pop(_normalize_for_index(query), None) is not None:
+        save_index(output_dir, index)
+
+
 def _token_containment(s1: str, s2: str) -> float:
     """Fraction of the shorter string's tokens that appear in the longer string.
     Handles suffix variants (Remaster, Deluxe, etc.) naturally — extra tokens
@@ -82,3 +129,22 @@ def find_in_index(index: dict[str, str], query: str, threshold: float = 0.85) ->
         if _token_containment(key, indexed_key) >= threshold:
             return path
     return None
+
+
+def check_queries(
+    index: dict[str, str], queries: list[str], threshold: float = 0.85,
+) -> tuple[list[tuple[str, str]], list[str]]:
+    """Partition queries into (have, missing).
+
+    `have` is a list of (query, file_path) tuples for queries already in the
+    library. `missing` is the list of queries that aren't.
+    """
+    have: list[tuple[str, str]] = []
+    missing: list[str] = []
+    for q in queries:
+        path = find_in_index(index, q, threshold=threshold)
+        if path:
+            have.append((q, path))
+        else:
+            missing.append(q)
+    return have, missing

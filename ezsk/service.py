@@ -20,7 +20,7 @@ from ezsk.download import (
     search_song,
 )
 from ezsk.normalize import query_hash
-from ezsk.state import is_completed, is_exhausted, load_state, save_state, update_entry
+from ezsk.state import RETRY_CAP, is_completed, is_exhausted, load_state, save_state, update_entry
 
 
 class DownloadService:
@@ -80,6 +80,11 @@ class DownloadService:
             if not isinstance(entry, dict):
                 continue
             status = entry.get("status", "unknown")
+            # A "queued" entry that has hit the retry cap is effectively dead —
+            # run_batch would skip it. Reclassify so it shows in the right bucket.
+            if status == "queued" and entry.get("attempts", 0) >= RETRY_CAP:
+                status = "dead"
+                entry = {**entry, "status": "dead"}
             if status in counts:
                 counts[status] += 1
             entries.append(entry)
@@ -124,6 +129,61 @@ class DownloadService:
         if candidates is None:
             return False
         return download_candidates(query, candidates, self.config)
+
+    def retry_one(self, query: str) -> bool:
+        """Reset a single failed/exhausted entry and immediately re-download it."""
+        state = load_state(self.config.state_file)
+        entry = state.get(query_hash(query))
+        if not isinstance(entry, dict):
+            return False
+        entry["status"] = "queued"
+        for field in ("error", "attempts"):
+            entry.pop(field, None)
+        save_state(self.config.state_file, state)
+        return self.run_single(query)
+
+    def replace(self, query: str, new_query: str | None = None) -> bool:
+        """Reject a completed track and re-download, optionally under a new query.
+
+        Deletes the current file and drops it from the library index. If
+        `new_query` matches `query`, the existing entry is reset to "queued" in
+        place. If it differs (the user edited the search string), the old entry is
+        removed and a fresh "queued" entry is created for the new query so the
+        original isn't left as a phantom. Then re-runs the normal search/download
+        pipeline. Returns the re-download result (False if there was nothing to
+        replace).
+        """
+        from ezsk.index import index_remove
+
+        target = (new_query or query).strip() or query
+
+        state = load_state(self.config.state_file)
+        entry = state.get(query_hash(query))
+        if not isinstance(entry, dict):
+            return False
+
+        local_path = entry.get("local_path", "")
+        if local_path and os.path.exists(local_path):
+            try:
+                os.remove(local_path)
+            except OSError:
+                pass
+
+        if self.config.index is not None:
+            index_remove(self.config.index, self.config.output_dir, query)
+
+        if query_hash(target) == query_hash(query):
+            # Same query: reset the existing entry in place.
+            entry["status"] = "queued"
+            for field in ("local_path", "error", "attempts", "progress", "total_size"):
+                entry.pop(field, None)
+        else:
+            # Superseded by an edited query: drop the old entry, queue the new one.
+            state.pop(query_hash(query), None)
+            update_entry(state, target, status="queued")
+        save_state(self.config.state_file, state)
+
+        return self.run_single(target)
 
     def _drain_pending(self) -> list[str]:
         """Collect and clear any queries added via enqueue()."""

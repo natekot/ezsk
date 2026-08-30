@@ -41,6 +41,48 @@ title_only_search = false
     assert c.title_only_search is False
 
 
+def test_from_file_reads_soulseek_username_from_slskd(tmp_path):
+    """soulseek_username lives under [slskd]."""
+    from ezsk.config import Config
+
+    config_file = tmp_path / "config.toml"
+    config_file.write_text("""\
+[slskd]
+api_key = "test-key-long-enough-for-validation"
+soulseek_username = "newname"
+""")
+
+    assert Config.from_file(config_file).soulseek_username == "newname"
+
+
+def test_from_file_falls_back_to_legacy_docker_username(tmp_path):
+    """Pre-0.2 configs stored soulseek_username under [docker]."""
+    from ezsk.config import Config
+
+    config_file = tmp_path / "config.toml"
+    config_file.write_text("""\
+[slskd]
+api_key = "test-key-long-enough-for-validation"
+
+[docker]
+soulseek_username = "legacyname"
+""")
+
+    assert Config.from_file(config_file).soulseek_username == "legacyname"
+
+
+def test_update_from_dict_falls_back_to_legacy_docker_username():
+    """The web settings PUT path honours the legacy [docker] section too."""
+    from ezsk.config import Config
+
+    c = Config()
+    c.update_from_dict({"docker": {"soulseek_username": "legacyname"}})
+    assert c.soulseek_username == "legacyname"
+
+    c.update_from_dict({"slskd": {"soulseek_username": "newname"}})
+    assert c.soulseek_username == "newname"
+
+
 def test_save_and_reload(tmp_path):
     """Config.save() produces a file that Config.from_file() can read back."""
     from ezsk.config import Config

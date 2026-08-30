@@ -5,6 +5,7 @@ import re
 import subprocess
 from dataclasses import dataclass
 
+from ezsk.matching import is_various_artists, significant_words
 from ezsk.normalize import normalize_query
 
 LOSSLESS_EXTENSIONS = {".flac", ".wav", ".ape", ".alac", ".aiff", ".aif"}
@@ -192,6 +193,9 @@ def _primary_artist(artist: str) -> str:
     return artist
 
 
+_MIN_MATCH = 0.6
+
+
 def check_metadata_match(file_path: str, query: str) -> str | None:
     """Check if the file's embedded tags match the query.
 
@@ -221,28 +225,30 @@ def check_metadata_match(file_path: str, query: str) -> str | None:
 
     q_artist, q_title = query.split(" - ", 1)
 
-    # Normalize to primary artist only; replace underscores with spaces
-    _STOP_WORDS = {"the", "a", "an", "and", "or", "of", "in", "on", "at", "to", "for", "is", "it", "my", "your", "x"}
-
-    def _words(text: str) -> set[str]:
-        return set(normalize_query(text.replace("_", " ")).split())
-
-    def _significant_words(text: str) -> set[str]:
-        return _words(text) - _STOP_WORDS
-
-    nq_artist = _significant_words(_primary_artist(q_artist))
-    nq_title = _words(q_title)
-    nt_artist = _significant_words(tag_artist)
-    nt_title = _words(tag_title)
+    nq_artist = significant_words(_primary_artist(q_artist).replace("_", " "))
+    nq_title = significant_words(q_title.replace("_", " "), drop_fillers=True)
+    nt_artist = significant_words(tag_artist.replace("_", " "))
+    nt_title = significant_words(tag_title.replace("_", " "), drop_fillers=True)
+    # Cross-match tag words across artist+title to tolerate swapped tags
+    # and remixer credits appearing in either field.
     t_all = nt_artist | nt_title
 
-    # Cross-match: allow artist/title swaps and remixer credits
-    t_all = nt_artist | nt_title
-    artist_match = len(nq_artist & t_all) / max(len(nq_artist), 1)
-    title_match = len(nq_title & t_all) / max(len(nq_title), 1)
+    artist_is_va = is_various_artists(q_artist)
+    title_match = len(nq_title & t_all) / len(nq_title) if nq_title else 1.0
 
-    # Reject if both artist and title are weak
-    if artist_match < 0.5 and title_match < 0.5:
+    if artist_is_va:
+        # Compilation: don't trust the artist tag; require title to carry it
+        if title_match < _MIN_MATCH:
+            return (
+                f"metadata mismatch: tags say \"{tag_artist} - {tag_title}\", "
+                f"expected \"{q_artist} - {q_title}\""
+            )
+        return None
+
+    artist_match = len(nq_artist & t_all) / len(nq_artist) if nq_artist else 1.0
+
+    # Reject if EITHER side is weak: a real match has strong artist AND title.
+    if artist_match < _MIN_MATCH or title_match < _MIN_MATCH:
         return (
             f"metadata mismatch: tags say \"{tag_artist} - {tag_title}\", "
             f"expected \"{q_artist} - {q_title}\""

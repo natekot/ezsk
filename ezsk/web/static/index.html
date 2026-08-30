@@ -50,8 +50,9 @@
     <tbody id="files-body"></tbody>
   </table>
   <div id="files-empty" class="empty-state" style="display:none"></div>
-  <div style="margin-top:0.75rem">
+  <div style="margin-top:0.75rem;display:flex;gap:0.5rem;align-items:center;flex-wrap:wrap">
     <button class="btn btn-success" id="btn-run-all" onclick="runAllFiles()">Run All</button>
+    <button class="btn btn-sm" id="btn-rescan-library" onclick="rescanLibrary()" title="Rescan the output directory to refresh the library index">Rescan library</button>
   </div>
 </div>
 
@@ -73,11 +74,38 @@
   </div>
 </div>
 
-<div class="filter-row">
+<!-- Replace modal -->
+<div id="replace-modal" style="display:none; position:fixed; top:0; left:0; width:100%; height:100%; background:rgba(0,0,0,0.5); z-index:1000; align-items:center; justify-content:center;">
+  <div class="replace-dialog">
+    <p class="replace-title">Replace track</p>
+    <p class="replace-hint">Edit the search query if needed. The current file will be deleted and a new copy downloaded.</p>
+    <input id="replace-input" type="text" autocomplete="off" spellcheck="false">
+    <div class="replace-actions">
+      <button class="btn" onclick="cancelReplace()">Cancel</button>
+      <button class="btn btn-success" onclick="confirmReplace()">Replace</button>
+    </div>
+  </div>
+</div>
+
+<!-- Welcome panel (shown when no entries exist) -->
+<div class="welcome" id="welcome-panel" style="display:none">
+  <h2>Welcome to ezsk!</h2>
+  <p>Search for any song or album to get started.</p>
+  <div class="welcome-search">
+    <input type="text" id="welcome-input" placeholder="e.g. Daft Punk - Around the World">
+    <button class="btn btn-success" onclick="welcomeSearch()">Download</button>
+  </div>
+  <div class="welcome-divider"><span>or paste a list of songs</span></div>
+  <textarea id="welcome-textarea" placeholder="One song per line, e.g.&#10;Daft Punk - Around the World&#10;Riva Starr - How It Feels&#10;Townes Van Zandt - Dead Flowers"></textarea>
+  <button class="btn btn-success" onclick="welcomeBatch()" style="margin-top:0.75rem">Download All</button>
+  <p class="welcome-hint">You can also drag playlist files onto the Files panel above.</p>
+</div>
+
+<div class="filter-row" id="filter-row">
   <input type="text" id="filter" placeholder="Filter by query..." autocomplete="off">
 </div>
 
-<table>
+<table id="main-table">
   <thead>
     <tr>
       <th data-col="0">Query</th>
@@ -105,7 +133,10 @@
   var sortCol = -1;
   var sortAsc = true;
   var configData = null;
+  var _pendingReplaces = {};
+  var _pendingRetries = {};
   var filesData = [];
+  var fileChecks = {};  // {filename: {have: [...], missing: [...], expanded: bool}}
   var batchTotal = 0;
   var batchRemaining = 0;
 
@@ -150,6 +181,10 @@
 
   // Render table
   function renderTable() {
+    _pendingReplaces = {};
+    var _nextReplaceIdx = 0;
+    _pendingRetries = {};
+    var _nextRetryIdx = 0;
     var rows = [];
     entries.forEach(function(e) {
       var status = e.status || 'unknown';
@@ -168,7 +203,17 @@
       }
       if (e.local_path && status === 'completed') {
         var fname = e.local_path.split('/').pop();
-        queryHtml += "<div class='local-path'>" + esc(fname) + "</div>";
+        var _ridx = _nextReplaceIdx++;
+        _pendingReplaces[_ridx] = e.query || '';
+        queryHtml += "<div class='local-path'>" + esc(fname) +
+          " <button class='btn-replace' data-replace-idx='" + _ridx +
+          "' title='Wrong, corrupt, or truncated? Delete and re-download.'>Replace</button></div>";
+      }
+      if (status === 'failed' || status === 'dead') {
+        var _tidx = _nextRetryIdx++;
+        _pendingRetries[_tidx] = e.query || '';
+        queryHtml += "<button class='btn-replace' data-retry-idx='" + _tidx +
+          "' title='Retry this download immediately'>Retry</button>";
       }
       rows.push({
         status: status,
@@ -229,6 +274,85 @@
     });
   }
 
+  // Welcome panel
+  function updateWelcome() {
+    var hasEntries = entries.length > 0;
+    document.getElementById('welcome-panel').style.display = hasEntries ? 'none' : '';
+    document.getElementById('filter-row').style.display = hasEntries ? '' : 'none';
+    document.getElementById('main-table').style.display = hasEntries ? '' : 'none';
+  }
+
+  // Replace modal
+  var _replaceOriginalQuery = '';
+  function openReplaceModal(query) {
+    _replaceOriginalQuery = query;
+    document.getElementById('replace-input').value = query;
+    var modal = document.getElementById('replace-modal');
+    modal.style.display = 'flex';
+    var input = document.getElementById('replace-input');
+    input.focus();
+    input.select();
+  }
+  window.cancelReplace = function() {
+    document.getElementById('replace-modal').style.display = 'none';
+  };
+  window.confirmReplace = function() {
+    var edited = document.getElementById('replace-input').value.trim();
+    if (!edited) { toast('Query cannot be empty'); return; }
+    document.getElementById('replace-modal').style.display = 'none';
+    fetch('/api/replace', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({query: _replaceOriginalQuery, new_query: edited})
+    }).then(function(r) { return r.json(); }).then(function(data) {
+      if (data.ok) { toast('Replacing: ' + edited); }
+      else { toast(data.error || 'Failed'); }
+    });
+  };
+  document.getElementById('replace-modal').addEventListener('click', function(e) {
+    if (e.target === this) cancelReplace();
+  });
+  document.getElementById('replace-input').addEventListener('keydown', function(e) {
+    if (e.key === 'Enter') confirmReplace();
+    if (e.key === 'Escape') cancelReplace();
+  });
+
+  window.welcomeSearch = function() {
+    var q = document.getElementById('welcome-input').value.trim();
+    if (!q) return;
+    fetch('/api/run', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({queries: [q]})
+    }).then(function(r) { return r.json(); }).then(function(data) {
+      if (data.ok) {
+        document.getElementById('welcome-input').value = '';
+        toast('Downloading: ' + q);
+      } else { toast(data.error || 'Failed'); }
+    });
+  };
+
+  window.welcomeBatch = function() {
+    var text = document.getElementById('welcome-textarea').value.trim();
+    if (!text) return;
+    var queries = text.split('\n').map(function(q) { return q.trim(); }).filter(Boolean);
+    fetch('/api/run', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({queries: queries})
+    }).then(function(r) { return r.json(); }).then(function(data) {
+      if (data.ok) {
+        document.getElementById('welcome-textarea').value = '';
+        toast('Started ' + data.count + ' downloads');
+      } else { toast(data.error || 'Failed'); }
+    });
+  };
+
+  // Allow Enter key in welcome search input
+  document.getElementById('welcome-input').addEventListener('keydown', function(e) {
+    if (e.key === 'Enter') welcomeSearch();
+  });
+
   // Update running state
   function updateRunning() {
     var badge = document.getElementById('running-badge');
@@ -242,19 +366,45 @@
     document.querySelectorAll('.btn-file-run').forEach(function(b) { b.disabled = isRunning; });
   }
 
-  // Card click
+  // Card click — clears text filter so the full status group is always visible
   document.querySelectorAll('.card[data-status]').forEach(function(card) {
     card.addEventListener('click', function() {
       var status = card.getAttribute('data-status');
       activeStatus = (activeStatus === status) ? 'all' : status;
+      filterText = '';
+      filterInput.value = '';
       updateCards();
       renderTable();
       writeHash();
     });
   });
 
-  // Badge click (delegate)
+  // Badge click + Replace button (delegate)
   document.getElementById('table-body').addEventListener('click', function(e) {
+    if (e.target.classList.contains('btn-replace')) {
+      var ridx = e.target.getAttribute('data-replace-idx');
+      if (ridx !== null) {
+        var query = _pendingReplaces[ridx];
+        if (!query) return;
+        openReplaceModal(query);
+        return;
+      }
+      var tidx = e.target.getAttribute('data-retry-idx');
+      if (tidx !== null) {
+        var query = _pendingRetries[tidx];
+        if (!query) return;
+        e.target.disabled = true;
+        fetch('/api/retry-one', {
+          method: 'POST',
+          headers: {'Content-Type': 'application/json'},
+          body: JSON.stringify({query: query})
+        }).then(function(r) { return r.json(); }).then(function(data) {
+          if (data.ok) { toast('Retrying: ' + query); }
+          else { toast(data.error || 'Failed'); e.target.disabled = false; }
+        }).catch(function() { e.target.disabled = false; });
+        return;
+      }
+    }
     if (e.target.classList.contains('badge')) {
       var status = e.target.textContent.trim();
       activeStatus = (activeStatus === status) ? 'all' : status;
@@ -304,6 +454,7 @@
       }
       updateCards();
       renderTable();
+      updateWelcome();
     });
 
     es.addEventListener('running', function(e) {
@@ -344,7 +495,7 @@
     {section:'output', key:'format', label:'Preferred Format'},
     {section:'output', key:'min_bitrate', label:'Min Bitrate', type:'number'},
     {section:'output', key:'min_bit_depth', label:'Min Bit Depth', type:'number'},
-    {section:'docker', key:'soulseek_username', label:'Soulseek Username'},
+    {section:'slskd', key:'soulseek_username', label:'Soulseek Username'},
     {section:'anthropic', key:'api_key', label:'Anthropic API Key', type:'password'},
     {section:'anthropic', key:'watch_dir', label:'Watch Dir'},
   ];
@@ -402,9 +553,17 @@
       body: JSON.stringify({queries: queries})
     }).then(function(r) { return r.json(); }).then(function(data) {
       if (data.ok) {
-        toast((data.queued ? 'Queued ' : 'Started ') + data.count + ' queries');
+        toast('Started ' + data.count + (data.count === 1 ? ' query' : ' queries'));
         document.getElementById('query-input').value = '';
         togglePanel('add-panel');
+        // Force immediate table refresh in case SSE hasn't fired yet.
+        fetch('/api/status').then(function(r) { return r.json(); }).then(function(s) {
+          entries = s.entries || [];
+          counts = s.counts || [];
+          updateCards();
+          renderTable();
+          updateWelcome();
+        });
       } else {
         toast(data.error || 'Failed');
       }
@@ -445,10 +604,18 @@
     var html = '';
     filesData.forEach(function(f) {
       var badgeCls = {cached:'badge-ok', unparsed:'badge-other', parsing:'badge-search', error:'badge-fail'}[f.status] || 'badge-other';
+      var check = fileChecks[f.name];
       var tracks = f.track_count != null ? f.track_count : '-';
+      var tracksCell = String(tracks);
+      if (check) {
+        tracksCell = check.have.length + ' owned / ' + check.missing.length + ' missing' +
+          ' <a href="#" class="check-toggle" data-file="' + esc(f.name) + '">' +
+          (check.expanded ? 'hide' : 'show') + '</a>';
+      }
       var actions = '';
       if (f.status === 'cached') {
         actions = '<button class="btn btn-sm btn-file-run" onclick="runFile(\'' + esc(f.name) + '\')"' + (isRunning ? ' disabled' : '') + '>Run</button> ';
+        actions += '<button class="btn btn-sm" onclick="checkFile(\'' + esc(f.name) + '\')">Check</button> ';
       }
       if (f.status !== 'parsing') {
         actions += '<button class="btn btn-sm" onclick="parseFile(\'' + esc(f.name) + '\')">Parse</button> ';
@@ -457,11 +624,33 @@
       html += '<tr>' +
         '<td>' + esc(f.name) + '</td>' +
         '<td><span class="badge ' + badgeCls + (f.status === 'parsing' ? ' badge-pulse' : '') + '">' + esc(f.status) + '</span></td>' +
-        '<td>' + tracks + '</td>' +
+        '<td>' + tracksCell + '</td>' +
         '<td class="file-actions">' + actions + '</td>' +
         '</tr>';
+      if (check && check.expanded) {
+        var detail = '';
+        if (check.missing.length) {
+          detail += '<div class="check-section"><strong>Missing (' + check.missing.length + '):</strong><ul>' +
+            check.missing.map(function(q) { return '<li>' + esc(q) + '</li>'; }).join('') + '</ul></div>';
+        }
+        if (check.have.length) {
+          detail += '<div class="check-section"><strong>Already owned (' + check.have.length + '):</strong><ul>' +
+            check.have.map(function(h) { return '<li>' + esc(h.query) + '</li>'; }).join('') + '</ul></div>';
+        }
+        html += '<tr class="check-row"><td colspan="4">' + detail + '</td></tr>';
+      }
     });
     body.innerHTML = html;
+    body.querySelectorAll('.check-toggle').forEach(function(a) {
+      a.addEventListener('click', function(e) {
+        e.preventDefault();
+        var name = a.getAttribute('data-file');
+        if (fileChecks[name]) {
+          fileChecks[name].expanded = !fileChecks[name].expanded;
+          renderFileList();
+        }
+      });
+    });
   }
 
   // Drag and drop — auto-upload on drop or file pick
@@ -504,10 +693,44 @@
   });
 
   window.parseFile = function(name) {
+    delete fileChecks[name];
     fetch('/api/files/' + encodeURIComponent(name) + '/parse', {method: 'POST'})
       .then(function(r) { return r.json(); })
       .then(function(data) {
         if (!data.ok) toast(data.error || 'Parse failed');
+      });
+  };
+
+  window.checkFile = function(name) {
+    toast('Checking library for ' + name + '...');
+    fetch('/api/files/' + encodeURIComponent(name) + '/check')
+      .then(function(r) { return r.json(); })
+      .then(function(data) {
+        if (data.error) { toast(data.error); return; }
+        fileChecks[name] = {have: data.have || [], missing: data.missing || [], expanded: true};
+        renderFileList();
+        toast(fileChecks[name].have.length + ' owned, ' + fileChecks[name].missing.length + ' missing');
+      });
+  };
+
+  window.rescanLibrary = function() {
+    var btn = document.getElementById('btn-rescan-library');
+    if (btn) { btn.disabled = true; btn.textContent = 'Rescanning...'; }
+    fetch('/api/library/rescan', {method: 'POST'})
+      .then(function(r) { return r.json(); })
+      .then(function(data) {
+        if (btn) { btn.disabled = false; btn.textContent = 'Rescan library'; }
+        if (data.ok) {
+          fileChecks = {};
+          renderFileList();
+          toast('Library rescanned (' + data.count + ' tracks)');
+        } else {
+          toast(data.error || 'Rescan failed');
+        }
+      })
+      .catch(function() {
+        if (btn) { btn.disabled = false; btn.textContent = 'Rescan library'; }
+        toast('Rescan failed');
       });
   };
 
@@ -521,6 +744,7 @@
   };
 
   window.deleteFile = function(name) {
+    delete fileChecks[name];
     fetch('/api/files/' + encodeURIComponent(name), {method: 'DELETE'})
       .then(function(r) { return r.json(); })
       .then(function(data) {

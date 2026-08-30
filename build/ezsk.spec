@@ -32,7 +32,6 @@ hiddenimports = [
     "ezsk.web.api",
     "ezsk.slskd_manager",
     "ezsk.setup",
-    "ezsk.docker",
     "ezsk.service",
     "ezsk.download",
     "ezsk.search",

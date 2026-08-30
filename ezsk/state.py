@@ -102,7 +102,7 @@ def update_entry(
     entry["status"] = status
     entry["last_attempt"] = time.strftime("%Y-%m-%dT%H:%M:%S")
     # Only count attempts on genuine failures (no results, all candidates
-    # exhausted), not on infrastructure errors (connection, docker, etc.)
+    # exhausted), not on infrastructure errors (connection, slskd down, etc.)
     if status == "failed" and not transient:
         entry["attempts"] = entry.get("attempts", 0) + 1
     if username:

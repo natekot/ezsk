@@ -35,17 +35,21 @@ REM Build
 echo Running PyInstaller...
 pyinstaller build\ezsk.spec --noconfirm
 
-REM Download slskd binary and bundle it
-echo Downloading slskd binary for bundling...
+REM Download slskd and bundle it
+echo Downloading slskd for bundling...
 python -c "from ezsk.slskd_manager import download_slskd; download_slskd(verbose=True)"
 
 for /f "delims=" %%i in ('python -c "from ezsk.slskd_manager import _slskd_binary_path; print(_slskd_binary_path())"') do set SLSKD_BIN=%%i
+for %%i in ("%SLSKD_BIN%") do set SLSKD_DIR=%%~dpi
 
 if exist "%SLSKD_BIN%" (
-    echo Bundling slskd binary...
+    REM Copy the whole release, not just the binary: slskd resolves wwwroot,
+    REM config, and etc relative to its own directory and will not start without them.
+    echo Bundling slskd...
     if exist dist\ezsk (
         mkdir dist\ezsk\bin 2>nul
-        copy "%SLSKD_BIN%" dist\ezsk\bin\slskd.exe
+        xcopy /E /I /Y "%SLSKD_DIR%*" dist\ezsk\bin\
+        del /Q dist\ezsk\bin\version.txt 2>nul
     )
 ) else (
     echo WARNING: slskd binary not found, skipping bundle

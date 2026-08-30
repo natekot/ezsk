@@ -101,6 +101,76 @@ def test_download_skips_when_bundled(tmp_path):
         del sys._MEIPASS
 
 
+def _fake_release_zip(tmp_path: Path, binary_name: str) -> bytes:
+    """A zip shaped like a real slskd release: binary plus sibling assets."""
+    import io
+    import zipfile
+
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w") as zf:
+        zf.writestr(binary_name, "fake binary")
+        zf.writestr("wwwroot/index.html", "<html></html>")
+        zf.writestr("config/slskd.example.yml", "example: true")
+        zf.writestr("etc/nothing", "")
+        zf.writestr("LICENSE", "license text")
+    return buf.getvalue()
+
+
+def _patch_download(monkeypatch, tmp_path, binary_name):
+    """Point slskd_manager at tmp_path and stub out the network."""
+    monkeypatch.setattr(mgr, "data_dir", lambda: tmp_path)
+    monkeypatch.delattr(sys, "_MEIPASS", raising=False)
+    monkeypatch.setattr(
+        mgr, "_latest_release", lambda: ("0.99.0", "https://example.com/slskd.zip")
+    )
+
+    payload = _fake_release_zip(tmp_path, binary_name)
+    mock_resp = MagicMock()
+    mock_resp.headers = {"Content-Length": str(len(payload))}
+    mock_resp.read.side_effect = [payload, b""]
+    mock_resp.__enter__ = lambda s: s
+    mock_resp.__exit__ = MagicMock(return_value=False)
+    return patch.object(mgr, "urlopen", return_value=mock_resp)
+
+
+def test_download_extracts_full_release(tmp_path, monkeypatch):
+    """The whole release lands next to the binary.
+
+    slskd resolves wwwroot/config/etc relative to its own directory and exits
+    with 'ContentPath specifies a non-existent directory' without them.
+    """
+    name = "slskd.exe" if platform.system() == "Windows" else "slskd"
+
+    with _patch_download(monkeypatch, tmp_path, name):
+        result = mgr.download_slskd(verbose=False)
+
+    bin_dir = tmp_path / "bin"
+    assert result == bin_dir / name
+    assert result.exists()
+    assert (bin_dir / "wwwroot" / "index.html").exists()
+    assert (bin_dir / "config" / "slskd.example.yml").exists()
+    assert (bin_dir / "LICENSE").exists()
+    # Scratch space is cleaned up
+    assert not (bin_dir / "extract").exists()
+    assert not (bin_dir / "slskd-download.zip").exists()
+    assert mgr.installed_version() == "0.99.0"
+
+
+def test_download_reinstalls_when_wwwroot_missing(tmp_path, monkeypatch):
+    """A binary-only install (from the old extraction) is repaired, not reused."""
+    name = "slskd.exe" if platform.system() == "Windows" else "slskd"
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir(parents=True)
+    (bin_dir / name).write_text("stale binary")
+    (bin_dir / "version.txt").write_text("0.99.0")
+
+    with _patch_download(monkeypatch, tmp_path, name):
+        mgr.download_slskd(verbose=False)
+
+    assert (bin_dir / "wwwroot" / "index.html").exists()
+    assert (bin_dir / name).read_text() == "fake binary"
+
+
 def test_latest_release_parses_response(monkeypatch):
     """_latest_release correctly parses the GitHub API response."""
     suffix = mgr._platform_suffix()

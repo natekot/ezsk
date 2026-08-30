@@ -18,6 +18,12 @@
 .setup .subtitle {
   text-align: center;
   color: #888;
+  margin-bottom: 0.5rem;
+}
+.setup .intro {
+  text-align: center;
+  color: #aaa;
+  font-size: 0.85rem;
   margin-bottom: 2rem;
 }
 .setup .step {
@@ -136,6 +142,32 @@
   font-size: 0.8rem;
   color: #888;
 }
+.setup .context {
+  color: #999;
+  font-size: 0.85rem;
+  margin-bottom: 1rem;
+  line-height: 1.5;
+}
+.setup .create-link {
+  display: inline-block;
+  margin-top: 0.5rem;
+  padding: 0.4rem 0.8rem;
+  background: rgba(92,124,250,0.15);
+  color: #5c7cfa;
+  border-radius: 4px;
+  text-decoration: none;
+  font-size: 0.85rem;
+  font-weight: 600;
+}
+.setup .create-link:hover {
+  background: rgba(92,124,250,0.25);
+}
+.setup .time-hint {
+  text-align: center;
+  color: #888;
+  font-size: 0.8rem;
+  margin-top: 0.75rem;
+}
 .spinner {
   display: inline-block;
   width: 16px;
@@ -156,7 +188,8 @@
 
 <div class="setup">
   <h1>ezsk</h1>
-  <p class="subtitle">Soulseek download automation</p>
+  <p class="subtitle">Music downloader</p>
+  <p class="intro">Download music from the Soulseek peer-to-peer network.<br>Let's get you set up.</p>
 
   <div class="progress-dots" id="dots">
     <div class="dot active"></div>
@@ -165,17 +198,17 @@
     <div class="dot"></div>
   </div>
 
-  <!-- Step 1: slskd mode -->
+  <!-- Step 1: Mode selection -->
   <div class="step active" id="step-0">
-    <h2>How should ezsk connect to Soulseek?</h2>
+    <h2>How do you want to get started?</h2>
     <div class="option-cards">
       <div class="option-card selected" data-mode="managed" onclick="selectMode(this)">
-        <h3>Automatic (recommended)</h3>
-        <p>ezsk downloads and manages slskd for you. No setup needed.</p>
+        <h3>Set up automatically (recommended)</h3>
+        <p>We'll handle everything. Just enter your Soulseek account on the next step.</p>
       </div>
       <div class="option-card" data-mode="external" onclick="selectMode(this)">
-        <h3>External slskd</h3>
-        <p>Connect to an slskd instance you're already running.</p>
+        <h3>I already have slskd running</h3>
+        <p>For advanced users who manage their own slskd instance.</p>
       </div>
     </div>
     <div class="nav">
@@ -186,23 +219,24 @@
 
   <!-- Step 2: Credentials -->
   <div class="step" id="step-1">
-    <h2>Soulseek Account</h2>
-    <p class="hint" style="margin-bottom:1rem">Create one at <a href="https://www.slsknet.org" target="_blank" style="color:#5c7cfa">slsknet.org</a> if you don't have one.</p>
-
-    <!-- Managed mode fields -->
+    <!-- Managed mode -->
     <div id="managed-fields">
+      <h2>Soulseek Account</h2>
+      <p class="context">Soulseek is a free music-sharing network. You need an account to search and download music from other users.</p>
       <div class="field">
-        <label>Soulseek Username</label>
+        <label>Username</label>
         <input type="text" id="slsk-username" autocomplete="username">
       </div>
       <div class="field">
-        <label>Soulseek Password</label>
+        <label>Password</label>
         <input type="password" id="slsk-password" autocomplete="current-password">
       </div>
+      <p class="hint">Don't have an account? <a href="https://www.slsknet.org" target="_blank" class="create-link">Create a free account at slsknet.org</a></p>
     </div>
 
-    <!-- External mode fields -->
+    <!-- External mode -->
     <div id="external-fields" style="display:none">
+      <h2>Connection Details</h2>
       <div class="field">
         <label>slskd URL</label>
         <input type="text" id="slskd-url" value="http://localhost:5030">
@@ -227,26 +261,26 @@
 
   <!-- Step 3: Output -->
   <div class="step" id="step-2">
-    <h2>Output Settings</h2>
+    <h2>Where should we save your music?</h2>
     <div class="field">
-      <label>Music Directory</label>
+      <label>Music folder</label>
       <input type="text" id="output-dir" placeholder="~/Music/soulseek">
-      <p class="hint">Where ezsk saves your downloaded music</p>
+      <p class="hint">Downloaded music will be organized and saved here</p>
     </div>
     <div class="field">
-      <label>Preferred Format</label>
+      <label>Preferred quality</label>
       <div class="option-cards" style="flex-direction:row; gap:0.5rem">
         <div class="option-card selected" data-format="flac" onclick="selectFormat(this)" style="flex:1; text-align:center">
           <h3>FLAC</h3>
-          <p>Lossless</p>
+          <p>Highest quality, larger files</p>
         </div>
         <div class="option-card" data-format="mp3" onclick="selectFormat(this)" style="flex:1; text-align:center">
           <h3>MP3</h3>
-          <p>320kbps</p>
+          <p>Smaller files, works everywhere</p>
         </div>
         <div class="option-card" data-format="any" onclick="selectFormat(this)" style="flex:1; text-align:center">
           <h3>Any</h3>
-          <p>Best available</p>
+          <p>Whatever's available</p>
         </div>
       </div>
     </div>
@@ -258,13 +292,14 @@
 
   <!-- Step 4: Installing -->
   <div class="step" id="step-3">
-    <h2>Setting Up</h2>
+    <h2>Setting up</h2>
     <div id="setup-status" class="status-msg show info">
       <span class="spinner"></span> Saving configuration...
     </div>
+    <p class="time-hint" id="time-hint">This usually takes about a minute.</p>
     <div id="setup-done" style="display:none; text-align:center; margin-top:2rem">
-      <p style="font-size:1.1rem; color:#51cf66; font-weight:600">Setup complete!</p>
-      <p style="color:#888; margin-top:0.5rem">Redirecting to dashboard...</p>
+      <p style="font-size:1.1rem; color:#51cf66; font-weight:600">You're all set!</p>
+      <p style="color:#888; margin-top:0.5rem">Redirecting...</p>
     </div>
   </div>
 </div>
@@ -328,6 +363,10 @@
   function doSetup() {
     var statusEl = document.getElementById('setup-status');
     var doneEl = document.getElementById('setup-done');
+    var timeHint = document.getElementById('time-hint');
+
+    // Hide time hint for external mode (instant)
+    if (mode === 'external') timeHint.style.display = 'none';
 
     var payload = {mode: mode, format: format};
 
@@ -356,28 +395,33 @@
       } else {
         statusEl.className = 'status-msg show err';
         statusEl.textContent = data.error || 'Setup failed';
+        timeHint.style.display = 'none';
       }
     }).catch(function(e) {
       statusEl.className = 'status-msg show err';
       statusEl.textContent = 'Connection error: ' + e.message;
+      timeHint.style.display = 'none';
     });
   }
 
   function pollSetup() {
     var statusEl = document.getElementById('setup-status');
     var doneEl = document.getElementById('setup-done');
+    var timeHint = document.getElementById('time-hint');
 
     var interval = setInterval(function() {
       fetch('/api/setup/status').then(function(r) { return r.json(); }).then(function(data) {
         if (data.done) {
           clearInterval(interval);
           statusEl.style.display = 'none';
+          timeHint.style.display = 'none';
           doneEl.style.display = '';
           setTimeout(function() { window.location.href = '/'; }, 2000);
         } else if (data.error) {
           clearInterval(interval);
           statusEl.className = 'status-msg show err';
           statusEl.textContent = data.error;
+          timeHint.style.display = 'none';
         } else if (data.status) {
           statusEl.innerHTML = '<span class="spinner"></span> ' + data.status;
         }

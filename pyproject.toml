@@ -28,7 +28,6 @@ dependencies = [
 
 [project.optional-dependencies]
 ai = ["anthropic>=0.40.0"]
-docker = ["docker>=7.0"]
 verify = ["soundfile>=0.12", "scipy>=1.11", "numpy>=1.24"]
 web = ["starlette>=0.40", "uvicorn[standard]>=0.30", "sse-starlette>=2.0", "python-multipart>=0.0.9"]
 tray-macos = ["rumps>=0.4"]

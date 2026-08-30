@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import getpass
-import os
 import secrets
 from pathlib import Path
 
@@ -42,17 +41,14 @@ def run_setup() -> None:
     print()
     print("How should ezsk run slskd?")
     print("  1. Automatic (recommended — ezsk downloads and manages slskd)")
-    print("  2. Docker (use an existing Docker setup)")
-    print("  3. External (I have slskd running already)")
+    print("  2. External (I have slskd running already)")
     choice = _prompt("Choice", "1")
     use_managed = choice == "1"
-    use_docker = choice == "2"
 
     url = "http://localhost:5030"
     api_key = ""
     downloads_dir = ""
     shared_dir = ""
-    docker_username = ""
     soulseek_username = ""
     soulseek_password = ""
 
@@ -68,19 +64,6 @@ def run_setup() -> None:
         downloads_dir = str(default_downloads_dir())
         print()
         print(f"  Downloads dir: {downloads_dir}")
-    elif use_docker:
-        # Docker path
-        print()
-        print("Soulseek account")
-        print("  (Create one at https://www.slsknet.org if you don't have one)")
-        docker_username = _prompt("Soulseek username")
-        soulseek_password = _prompt_password("Soulseek password")
-
-        api_key = secrets.token_urlsafe(32)
-        downloads_dir = str(default_downloads_dir())
-        print()
-        print(f"  Generated API key: {api_key}")
-        print(f"  Downloads dir: {downloads_dir}")
     else:
         # External slskd path
         print()
@@ -92,7 +75,7 @@ def run_setup() -> None:
         api_key = _prompt("API key")
         print()
         print("  The slskd downloads directory is where slskd saves files.")
-        print("  Check your slskd config or Docker volume mounts.")
+        print("  Check your slskd config under: directories > downloads")
         downloads_dir = _prompt("slskd downloads directory")
 
     # Output directory
@@ -118,6 +101,7 @@ url = "{url}"
 api_key = "{api_key}"
 downloads_dir = "{downloads_dir}"
 shared_dir = "{shared_dir}"
+soulseek_username = "{soulseek_username}"
 
 [output]
 dir = "{output_dir}"
@@ -126,9 +110,6 @@ format = "flac"
 min_bitrate = 320
 min_bit_depth = 16
 verify = true
-
-[docker]
-soulseek_username = "{docker_username}"
 
 [anthropic]
 api_key = "{anthropic_api_key}"
@@ -155,20 +136,6 @@ api_key = "{anthropic_api_key}"
             except Exception as e:
                 print_error(f"Failed to start slskd: {e}")
                 print_status("You can start it later with: ezsk --managed 'Artist - Title'")
-    elif use_docker:
-        print()
-        if _prompt_yn("Start slskd Docker container now?", default=True):
-            from ezsk.config import Config
-            config = Config.from_file()
-            config.apply_env()
-            os.environ["SLSKD_PASSWORD"] = soulseek_password
-            try:
-                from ezsk.docker import ensure_slskd_running
-                ensure_slskd_running(config)
-                print_status("slskd is running and connected.")
-            except Exception as e:
-                print_error(f"Failed to start slskd: {e}")
-                print_status("You can start it later with: ezsk --docker 'Artist - Title'")
     else:
         print()
         print_status("Testing connection...")
@@ -185,7 +152,7 @@ api_key = "{anthropic_api_key}"
 
     # Next steps
     print()
-    flag = " --managed" if use_managed else (" --docker" if use_docker else "")
+    flag = " --managed" if use_managed else ""
     print("Next steps:")
     print(f"  ezsk{flag} 'Artist - Title'")
     print(f"  ezsk{flag} -f tracks.txt")

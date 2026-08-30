@@ -35,30 +35,27 @@ rm -rf dist/ezsk dist/ezsk.app build/__pycache__
 echo "Running PyInstaller..."
 pyinstaller build/ezsk.spec --noconfirm
 
-# Download slskd binary and include it in the bundle
-echo "Downloading slskd binary for bundling..."
+# Download slskd and include it in the bundle
+echo "Downloading slskd for bundling..."
 python3 -c "
-from ezsk.slskd_manager import download_slskd, _slskd_binary_path
+from ezsk.slskd_manager import download_slskd
 binary = download_slskd(verbose=True)
 print(f'slskd binary: {binary}')
 "
 
 SLSKD_BIN="$(python3 -c "from ezsk.slskd_manager import _slskd_binary_path; print(_slskd_binary_path())")"
+SLSKD_DIR="$(dirname "$SLSKD_BIN")"
 if [ -f "$SLSKD_BIN" ]; then
-    echo "Bundling slskd binary..."
-    if [ -d "dist/ezsk.app" ]; then
-        # .app bundle
-        RESOURCES="dist/ezsk.app/Contents/Resources"
-        mkdir -p "$RESOURCES/bin"
-        cp "$SLSKD_BIN" "$RESOURCES/bin/slskd"
-        chmod +x "$RESOURCES/bin/slskd"
-    fi
-    if [ -d "dist/ezsk" ]; then
-        # onedir bundle
-        mkdir -p "dist/ezsk/bin"
-        cp "$SLSKD_BIN" "dist/ezsk/bin/slskd"
-        chmod +x "dist/ezsk/bin/slskd"
-    fi
+    # Copy the whole release, not just the binary: slskd resolves wwwroot,
+    # config, and etc relative to its own directory and will not start without them.
+    echo "Bundling slskd..."
+    for TARGET in "dist/ezsk.app/Contents/Resources" "dist/ezsk"; do
+        [ -d "$TARGET" ] || continue
+        mkdir -p "$TARGET/bin"
+        cp -R "$SLSKD_DIR"/* "$TARGET/bin/"
+        rm -f "$TARGET/bin/version.txt"
+        chmod +x "$TARGET/bin/slskd"
+    done
 else
     echo "WARNING: slskd binary not found at $SLSKD_BIN, skipping bundle"
 fi

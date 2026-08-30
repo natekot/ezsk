@@ -45,6 +45,8 @@ def build_parser() -> argparse.ArgumentParser:
         help="Verify downloaded file quality via spectral analysis")
     out.add_argument("--min-frequency-cutoff", type=float, default=None,
         help="Min frequency cutoff in kHz for transcode detection (default: 19.0)")
+    out.add_argument("--no-strict-metadata-check", action="store_true",
+        help="Disable the post-download tag-vs-query metadata check (on by default)")
 
     adv = p.add_argument_group("advanced")
     adv.add_argument("--slskd-downloads-dir", help="Path to slskd downloads directory")
@@ -56,13 +58,14 @@ def build_parser() -> argparse.ArgumentParser:
     adv.add_argument("--log-file", help="Path to log file")
     adv.add_argument("--managed", action="store_true",
         help="Manage slskd as a local process (download and start automatically)")
-    adv.add_argument("--docker", action="store_true", help="Manage slskd via Docker (legacy)")
     adv.add_argument("--no-index", action="store_true",
         help="Disable output directory index (skip duplicate checking)")
     adv.add_argument("--reindex", action="store_true",
         help="Rebuild the output directory index from scratch")
     adv.add_argument("--status", action="store_true",
         help="Generate and open an HTML status dashboard")
+    adv.add_argument("--replace", metavar="QUERY",
+        help="Reject a completed track's file and re-download a fresh copy")
 
     adv.add_argument("--serve", action="store_true",
         help="Start the web UI (requires ezsk[web])")
@@ -97,10 +100,6 @@ def main(argv: list[str] | None = None) -> None:
         from ezsk.slskd_manager import ensure_running
         ensure_running(config)
 
-    if args.docker:
-        from ezsk.docker import ensure_slskd_running
-        ensure_slskd_running(config)
-
     # Load index (on by default)
     if not args.no_index:
         from ezsk.index import load_index
@@ -109,6 +108,22 @@ def main(argv: list[str] | None = None) -> None:
     if config.log_file:
         from ezsk.display import set_log_file
         set_log_file(config.log_file)
+
+    if args.replace:
+        errors = config.validate()
+        if errors:
+            for e in errors:
+                print_error(e)
+            sys.exit(1)
+        from ezsk.client import SlskdClient
+        try:
+            SlskdClient(config).check_connection()
+        except Exception as e:
+            print_error(f"Cannot connect to slskd at {config.url}: {e}")
+            sys.exit(1)
+        from ezsk.service import DownloadService
+        success = DownloadService(config).replace(args.replace)
+        sys.exit(0 if success else 1)
 
     if args.desktop:
         try:

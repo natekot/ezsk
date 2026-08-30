@@ -22,6 +22,7 @@ url = "http://localhost:5030"
 api_key = ""
 downloads_dir = ""
 shared_dir = ""
+soulseek_username = ""
 
 [output]
 dir = "./downloads"
@@ -32,9 +33,7 @@ min_bit_depth = 16
 verify = false
 min_frequency_cutoff = 19.0
 title_only_search = true
-
-[docker]
-soulseek_username = ""
+strict_metadata_check = true
 
 [anthropic]
 api_key = ""
@@ -56,13 +55,13 @@ class Config:
     verify: bool = False
     min_frequency_cutoff: float = 19.0
     title_only_search: bool = True
+    strict_metadata_check: bool = True
     interactive: bool = False
     verbose: bool = False
     timeout: int = 300
     state_file: str = ""
     log_file: str = ""
-    docker: bool = False
-    docker_username: str = ""
+    soulseek_username: str = ""
     anthropic_api_key: str = ""
     watch_dir: str = ""
     index: dict[str, str] | None = None  # populated at runtime by --index flag
@@ -96,7 +95,12 @@ class Config:
         cfg.verify = output.get("verify", cfg.verify)
         cfg.min_frequency_cutoff = output.get("min_frequency_cutoff", cfg.min_frequency_cutoff)
         cfg.title_only_search = output.get("title_only_search", cfg.title_only_search)
-        cfg.docker_username = docker.get("soulseek_username", cfg.docker_username)
+        cfg.strict_metadata_check = output.get("strict_metadata_check", cfg.strict_metadata_check)
+        # Falls back to the pre-0.2 [docker] section for existing configs.
+        cfg.soulseek_username = slskd.get(
+            "soulseek_username",
+            docker.get("soulseek_username", cfg.soulseek_username),
+        )
         anthropic = data.get("anthropic", {})
         cfg.anthropic_api_key = anthropic.get("api_key", cfg.anthropic_api_key)
         cfg.watch_dir = anthropic.get("watch_dir", cfg.watch_dir)
@@ -142,9 +146,10 @@ class Config:
             self.verify = True
         if getattr(args, "min_frequency_cutoff", None) is not None:
             self.min_frequency_cutoff = args.min_frequency_cutoff
+        if getattr(args, "no_strict_metadata_check", False):
+            self.strict_metadata_check = False
         self.interactive = args.interactive
         self.verbose = args.verbose
-        self.docker = args.docker
 
     SENSITIVE_FIELDS = {"api_key", "anthropic_api_key"}
 
@@ -155,6 +160,7 @@ class Config:
                 "api_key": self.api_key,
                 "downloads_dir": self.downloads_dir,
                 "shared_dir": self.shared_dir,
+                "soulseek_username": self.soulseek_username,
             },
             "output": {
                 "dir": self.output_dir,
@@ -165,9 +171,7 @@ class Config:
                 "verify": self.verify,
                 "min_frequency_cutoff": self.min_frequency_cutoff,
                 "title_only_search": self.title_only_search,
-            },
-            "docker": {
-                "soulseek_username": self.docker_username,
+                "strict_metadata_check": self.strict_metadata_check,
             },
             "anthropic": {
                 "api_key": self.anthropic_api_key,
@@ -204,8 +208,12 @@ class Config:
             self.min_frequency_cutoff = output["min_frequency_cutoff"]
         if "title_only_search" in output:
             self.title_only_search = output["title_only_search"]
-        if "soulseek_username" in docker:
-            self.docker_username = docker["soulseek_username"]
+        if "strict_metadata_check" in output:
+            self.strict_metadata_check = output["strict_metadata_check"]
+        if "soulseek_username" in slskd:
+            self.soulseek_username = slskd["soulseek_username"]
+        elif "soulseek_username" in docker:
+            self.soulseek_username = docker["soulseek_username"]
         if "api_key" in anthropic:
             self.anthropic_api_key = anthropic["api_key"]
         if "watch_dir" in anthropic:

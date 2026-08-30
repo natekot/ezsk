@@ -60,10 +60,13 @@ def generate_dashboard(config: Config, *, active: bool = False) -> str:
         if status == "downloading" and e.get("total_size"):
             pct = min(100, int(e["progress"] / e["total_size"] * 100))
             progress_html = f"<div class='progress'><div class='progress-bar' style='width:{pct}%'></div></div><span class='progress-pct'>{pct}%</span>"
+        remote_fn = e.get("remote_filename", "")
+        source_basename = remote_fn.replace("\\", "/").rsplit("/", 1)[-1] if remote_fn else ""
         table_rows.append(
             f"<tr class='state-row' data-status='{html.escape(status)}'>"
             f"<td>{html.escape(e.get('query', ''))}</td>"
             f"<td><span class='badge {badge_cls}'>{html.escape(status)}</span>{progress_html}</td>"
+            f"<td class='source' title='{html.escape(remote_fn)}'>{html.escape(source_basename)}</td>"
             f"<td data-sort-value='{attempts}'>{attempts}</td>"
             f"<td data-sort-value='{html.escape(last_attempt)}'>{html.escape(_fmt_timestamp(last_attempt))}</td>"
             f"<td>{html.escape(e.get('error', ''))}</td>"
@@ -75,6 +78,7 @@ def generate_dashboard(config: Config, *, active: bool = False) -> str:
             f"<tr class='state-row' data-status='queued'>"
             f"<td>{html.escape(q)}</td>"
             f"<td><span class='badge badge-queued'>queued</span></td>"
+            f"<td></td>"
             f"<td data-sort-value='0'></td><td data-sort-value=''></td><td></td>"
             f"</tr>"
         )
@@ -83,6 +87,7 @@ def generate_dashboard(config: Config, *, active: bool = False) -> str:
             f"<tr class='state-row' data-status='dead'>"
             f"<td>{html.escape(d)}</td>"
             f"<td><span class='badge badge-dead'>dead</span></td>"
+            f"<td></td>"
             f"<td data-sort-value='0'></td><td data-sort-value=''></td><td></td>"
             f"</tr>"
         )
@@ -135,6 +140,7 @@ th.sort-desc::after {{ content: ' ▼'; }}
 .progress {{ height: 6px; background: var(--border); border-radius: 3px; margin-top: 6px; overflow: hidden; }}
 .progress-bar {{ height: 100%; background: var(--dl); transition: width 0.3s; }}
 .progress-pct {{ font-size: 0.75rem; color: var(--other); margin-left: 4px; }}
+td.source {{ font-family: ui-monospace, monospace; font-size: 0.8rem; color: var(--other); max-width: 280px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }}
 .ts {{ font-size: 0.8rem; color: var(--other); margin-top: 1rem; }}
 </style>
 </head>
@@ -150,9 +156,9 @@ th.sort-desc::after {{ content: ' ▼'; }}
 </div>
 <input type="text" id="filter" placeholder="Filter by query..." autocomplete="off">
 <table>
-<thead><tr><th>Query</th><th>Status</th><th>Attempts</th><th>Last Attempt</th><th>Error</th></tr></thead>
+<thead><tr><th>Query</th><th>Status</th><th>Source</th><th>Attempts</th><th>Last Attempt</th><th>Error</th></tr></thead>
 <tbody>
-{"".join(table_rows) if table_rows else "<tr><td colspan='5'>No data yet</td></tr>"}
+{"".join(table_rows) if table_rows else "<tr><td colspan='6'>No data yet</td></tr>"}
 </tbody>
 </table>
 <div class="ts">Generated {html.escape(timestamp)}</div>
@@ -219,7 +225,7 @@ th.sort-desc::after {{ content: ' ▼'; }}
     rows.sort(function(a, b) {{
       var av = a.cells[idx].dataset.sortValue !== undefined ? a.cells[idx].dataset.sortValue : a.cells[idx].textContent.trim();
       var bv = b.cells[idx].dataset.sortValue !== undefined ? b.cells[idx].dataset.sortValue : b.cells[idx].textContent.trim();
-      if (idx === 2) {{ av = Number(av) || 0; bv = Number(bv) || 0; return sortAsc ? av - bv : bv - av; }}
+      if (idx === 3) {{ av = Number(av) || 0; bv = Number(bv) || 0; return sortAsc ? av - bv : bv - av; }}
       return sortAsc ? av.localeCompare(bv) : bv.localeCompare(av);
     }});
     rows.forEach(function(row) {{ tbody.appendChild(row); }});

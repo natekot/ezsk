@@ -66,16 +66,18 @@ url = "http://localhost:5030"
 api_key = ""
 downloads_dir = ""    # path to slskd's downloads directory
 shared_dir = ""       # directory to share with Soulseek users
+soulseek_username = ""
 
 [output]
 dir = "./downloads"
 pattern = "{artist} - {title}.{ext}"
-format = "flac"       # preferred format: flac, mp3, etc.
-min_bitrate = 320     # minimum bitrate for lossy files
-min_bit_depth = 16    # minimum bit depth for lossless files
-
-[docker]
-soulseek_username = ""
+format = "flac"           # preferred format: flac, mp3, etc.
+min_bitrate = 320         # minimum bitrate for lossy files
+min_bit_depth = 16        # minimum bit depth for lossless files
+verify = false            # verify audio after download
+min_frequency_cutoff = 19.0  # kHz; spectral cutoff below this is suspect
+title_only_search = true  # search by title, then filter by artist
+strict_metadata_check = true
 
 [anthropic]
 api_key = ""          # for AI-powered search and playlist parsing
@@ -101,7 +103,7 @@ usage: ezsk [-h] [-f FILE] [-c COLUMNS] [-n LIMIT] [--init]
             [--min-bitrate MIN_BITRATE] [--min-bit-depth MIN_BIT_DEPTH]
             [--slskd-downloads-dir DIR] [--shared-dir DIR]
             [-i] [-v] [--timeout TIMEOUT] [--max-results MAX_RESULTS]
-            [--state-file FILE] [--log-file FILE] [--docker]
+            [--state-file FILE] [--log-file FILE] [--managed]
             [--index] [--reindex] [--status]
             [--watch-dir DIR] [--anthropic-api-key KEY]
             [query ...]
@@ -166,11 +168,9 @@ ezsk can manage its own slskd instance — no separate install needed:
 ezsk --managed
 ```
 
-Or use Docker:
-
-```bash
-ezsk -f tracks.txt --docker
-```
+Run `ezsk --setup` once first to supply your Soulseek credentials. To point at
+an slskd you already run yourself, set `[slskd] url` and `api_key` in
+`config.toml` and omit `--managed`.
 
 ### Duplicate detection
 

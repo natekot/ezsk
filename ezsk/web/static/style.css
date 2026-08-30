@@ -201,6 +201,13 @@ th.sort-desc::after { content: ' \25BC'; }
 .files-table { margin-bottom: 0; }
 .files-table th { font-size: 0.8rem; }
 .file-actions { white-space: nowrap; }
+.check-toggle { margin-left: 0.4rem; font-size: 0.8rem; color: var(--search); text-decoration: none; }
+.check-toggle:hover { text-decoration: underline; }
+.check-row td { background: var(--card-bg); padding: 0.5rem 0.75rem; }
+.check-section { margin-bottom: 0.5rem; font-size: 0.85rem; }
+.check-section:last-child { margin-bottom: 0; }
+.check-section ul { margin: 0.25rem 0 0 1.25rem; padding: 0; }
+.check-section li { margin: 0.1rem 0; }
 
 /* Small buttons */
 .btn-sm {
@@ -227,6 +234,83 @@ th.sort-desc::after { content: ' \25BC'; }
 .local-path {
   font-size: 0.8rem; color: var(--ok);
   margin-top: 2px;
+}
+.btn-replace {
+  font-size: 0.7rem; padding: 1px 6px; margin-left: 4px;
+  border: 1px solid var(--border); border-radius: 4px;
+  background: transparent; color: var(--other);
+  cursor: pointer; vertical-align: middle;
+}
+.btn-replace:hover { background: var(--card-bg); color: var(--fg); }
+.btn-replace:disabled { opacity: 0.5; cursor: not-allowed; }
+.replace-dialog {
+  background: var(--card-bg); border: 1px solid var(--border);
+  border-radius: 10px; padding: 1.5rem; width: 420px; max-width: 90vw;
+}
+.replace-title { margin: 0 0 0.4rem; font-weight: 600; font-size: 1rem; }
+.replace-hint { margin: 0 0 0.9rem; font-size: 0.82rem; color: var(--other); }
+.replace-dialog input[type=text] {
+  width: 100%; box-sizing: border-box;
+  padding: 0.4rem 0.6rem; border: 1px solid var(--border); border-radius: 5px;
+  background: var(--bg); color: var(--fg); font-size: 0.9rem;
+}
+.replace-actions { display: flex; gap: 0.5rem; justify-content: flex-end; margin-top: 0.9rem; }
+
+/* Welcome panel */
+.welcome {
+  background: var(--card-bg);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 2.5rem 2rem;
+  text-align: center;
+  margin-bottom: 1.5rem;
+}
+.welcome h2 {
+  font-size: 1.3rem;
+  margin-bottom: 0.5rem;
+}
+.welcome > p {
+  color: var(--other);
+  margin-bottom: 1.5rem;
+}
+.welcome-search {
+  display: flex;
+  gap: 0.5rem;
+  max-width: 420px;
+  margin: 0 auto 1.5rem;
+}
+.welcome-search input {
+  flex: 1;
+}
+.welcome-divider {
+  position: relative;
+  margin: 1.5rem 0;
+  text-align: center;
+  color: var(--other);
+  font-size: 0.85rem;
+}
+.welcome-divider::before {
+  content: '';
+  position: absolute;
+  top: 50%;
+  left: 0;
+  right: 0;
+  border-top: 1px solid var(--border);
+}
+.welcome-divider span {
+  position: relative;
+  background: var(--card-bg);
+  padding: 0 1rem;
+}
+.welcome textarea {
+  max-width: 420px;
+  margin: 0 auto;
+  display: block;
+}
+.welcome-hint {
+  color: var(--other);
+  font-size: 0.8rem;
+  margin-top: 1.5rem;
 }
 
 /* Update banner */

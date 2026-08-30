@@ -22,8 +22,9 @@ htmlcov/
 # macOS
 .DS_Store
 
-# Claude Code
-.claude/
+# Claude Code — local settings ignored, shared skills tracked
+.claude/*
+!.claude/skills/
 
 # IDE
 .idea/

@@ -83,20 +83,74 @@ async def post_run(request: Request) -> JSONResponse:
     if not queries:
         return JSONResponse({"error": "No queries provided"}, status_code=400)
 
-    if app_state.service.running:
-        # Batch in progress — queue the new queries so they run next
-        app_state.service.enqueue(queries)
-        return JSONResponse({"ok": True, "count": len(queries), "queued": True})
+    import os
+    from ezsk.download import _append_to_queue
+    from ezsk.state import load_state, is_completed
+
+    # Filter already-completed queries.
+    state = await asyncio.to_thread(load_state, app_state.config.state_file)
+    new_queries = [q for q in queries if not is_completed(state, q)]
+    if not new_queries:
+        return JSONResponse({"ok": True, "count": 0})
+
+    # Persist immediately so queries appear in the UI before the batch starts.
+    queue_path = os.path.join(app_state.config.output_dir, "queued.txt")
+    await asyncio.to_thread(_append_to_queue, queue_path, new_queries)
+
+    # Push state update directly to SSE subscribers (we're already in the loop).
+    status = app_state.service.get_status()
+    status["running"] = app_state.service.running
+    data = json.dumps(status)
+    for q in list(app_state._subscribers):
+        try:
+            q.put_nowait(("state", data))
+        except Exception:
+            pass
+
+    # Spawn each query as an independent on-demand task so it runs immediately
+    # regardless of whether a background batch is already in progress.
+    async def _run_on_demand(query: str) -> None:
+        await asyncio.to_thread(app_state.service.run_single, query)
+
+    for q in new_queries:
+        _spawn(_run_on_demand(q))
+
+    return JSONResponse({"ok": True, "count": len(new_queries)})
+
+
+async def post_retry_one(request: Request) -> JSONResponse:
+    app_state: AppState = request.app.state.app_state
+
+    body = await request.json()
+    query = (body.get("query") or "").strip()
+    if not query:
+        return JSONResponse({"error": "No query provided"}, status_code=400)
 
     async def _run() -> None:
-        app_state.notify_running(True)
-        try:
-            await asyncio.to_thread(app_state.service.run_batch, queries)
-        finally:
-            app_state.notify_running(False)
+        await asyncio.to_thread(app_state.service.retry_one, query)
 
     _spawn(_run())
-    return JSONResponse({"ok": True, "count": len(queries)})
+    return JSONResponse({"ok": True})
+
+
+async def post_replace(request: Request) -> JSONResponse:
+    app_state: AppState = request.app.state.app_state
+
+    body = await request.json()
+    query = (body.get("query") or "").strip()
+    if not query:
+        return JSONResponse({"error": "No query provided"}, status_code=400)
+    # Optional edited search string; defaults to the original query.
+    new_query = (body.get("new_query") or "").strip() or query
+
+    # Run on-demand so a track can be replaced even while a batch is in progress.
+    # replace() resets the entry and save_state() fans the update out to SSE
+    # subscribers, so the row reflects the pending re-download on its own.
+    async def _run_replace() -> None:
+        await asyncio.to_thread(app_state.service.replace, query, new_query)
+
+    _spawn(_run_replace())
+    return JSONResponse({"ok": True})
 
 
 async def post_retry(request: Request) -> JSONResponse:
@@ -248,6 +302,40 @@ async def delete_file(request: Request) -> JSONResponse:
     return JSONResponse({"ok": True})
 
 
+async def check_file(request: Request) -> JSONResponse:
+    """Return which queries from the cached file are already in the library."""
+    app_state: AppState = request.app.state.app_state
+    name = request.path_params["name"]
+    queries = app_state.watch.read_cached(name)
+    if not queries:
+        return JSONResponse({"error": "No cached queries for this file"}, status_code=400)
+
+    from ezsk.index import check_queries
+
+    index = app_state.config.index or {}
+    have, missing = await asyncio.to_thread(check_queries, index, queries)
+    return JSONResponse({
+        "have": [{"query": q, "path": p} for q, p in have],
+        "missing": missing,
+    })
+
+
+async def post_library_rescan(request: Request) -> JSONResponse:
+    """Rebuild the output-directory index and refresh it on the live config."""
+    app_state: AppState = request.app.state.app_state
+
+    from ezsk.index import build_index, save_index
+
+    def _rebuild() -> int:
+        index = build_index(app_state.config.output_dir)
+        save_index(app_state.config.output_dir, index)
+        app_state.config.index = index
+        return len(index)
+
+    count = await asyncio.to_thread(_rebuild)
+    return JSONResponse({"ok": True, "count": count})
+
+
 async def run_all_files(request: Request) -> JSONResponse:
     app_state: AppState = request.app.state.app_state
     if app_state.service.running:
@@ -320,21 +408,21 @@ async def post_setup(request: Request) -> JSONResponse:
     async def _finish_setup():
         try:
             if mode == "managed":
-                app_state._setup_status = "Downloading slskd..."
+                app_state._setup_status = "Downloading Soulseek connector..."
                 from ezsk.slskd_manager import download_slskd, generate_config, ensure_running
                 await asyncio.to_thread(download_slskd, True)
 
-                app_state._setup_status = "Configuring slskd..."
+                app_state._setup_status = "Configuring your account..."
                 await asyncio.to_thread(
                     generate_config, config,
                     app_state._setup_slsk_username,
                     app_state._setup_slsk_password,
                 )
 
-                app_state._setup_status = "Starting slskd..."
+                app_state._setup_status = "Connecting to the Soulseek network..."
                 await asyncio.to_thread(ensure_running, config)
 
-            app_state._setup_status = "Ready!"
+            app_state._setup_status = "Almost ready..."
             app_state._setup_done = True
             app_state.needs_setup = False
         except Exception as e:
@@ -369,6 +457,8 @@ def routes(app_state: AppState) -> list[Route]:
         Route("/api/config", put_config, methods=["PUT"]),
         Route("/api/run", post_run, methods=["POST"]),
         Route("/api/retry", post_retry, methods=["POST"]),
+        Route("/api/replace", post_replace, methods=["POST"]),
+        Route("/api/retry-one", post_retry_one, methods=["POST"]),
         Route("/api/cancel", post_cancel, methods=["POST"]),
         Route("/api/events", events),
         Route("/api/files", get_files, methods=["GET"]),
@@ -376,7 +466,9 @@ def routes(app_state: AppState) -> list[Route]:
         Route("/api/files/run-all", run_all_files, methods=["POST"]),
         Route("/api/files/{name:path}/parse", parse_file, methods=["POST"]),
         Route("/api/files/{name:path}/run", run_file, methods=["POST"]),
+        Route("/api/files/{name:path}/check", check_file, methods=["GET"]),
         Route("/api/files/{name:path}", delete_file, methods=["DELETE"]),
+        Route("/api/library/rescan", post_library_rescan, methods=["POST"]),
         Route("/api/setup", post_setup, methods=["POST"]),
         Route("/api/setup/status", get_setup_status, methods=["GET"]),
         Route("/api/update", get_update, methods=["GET"]),

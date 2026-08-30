@@ -55,9 +55,15 @@ def _smart_search(
     try:
         search_id = client.start_search(query, timeout_ms=SEARCH_TIMEOUT * 1000)
     except Exception as e:
-        if "409" in str(e) or "Conflict" in str(e):
+        err = str(e)
+        if "409" in err or "Conflict" in err:
             print_status("slskd disconnected, reconnecting...")
             client.ensure_connected()
+            client.cleanup_searches()
+            search_id = client.start_search(query, timeout_ms=SEARCH_TIMEOUT * 1000)
+        elif "400" in err or "Bad Request" in err:
+            # slskd search history full — purge and retry once
+            print_status("slskd search history full, purging...")
             client.cleanup_searches()
             search_id = client.start_search(query, timeout_ms=SEARCH_TIMEOUT * 1000)
         else:
@@ -186,7 +192,10 @@ def search_song(query: str, config: Config, client: SlskdClient) -> list[dict] |
         total_files = sum(len(r.get("files", [])) for r in responses)
         print_verbose(f"Full search returned {len(responses)} users, {total_files} files", config.verbose)
 
-        candidates = rank_results(responses, query, config.preferred_format, config.min_bitrate, config.min_bit_depth)
+        candidates = rank_results(
+            responses, query, config.preferred_format, config.min_bitrate,
+            config.min_bit_depth, artist_filter=artist,
+        )
 
     # Fallback: try with remix/version suffixes stripped
     if not candidates:
@@ -195,7 +204,10 @@ def search_song(query: str, config: Config, client: SlskdClient) -> list[dict] |
             print_verbose(f"Retrying without suffix: {variant}", config.verbose)
             try:
                 _search_id2, responses2 = _smart_search(client, normalize_query(variant), config)
-                candidates = rank_results(responses2, query, config.preferred_format, config.min_bitrate, config.min_bit_depth)
+                candidates = rank_results(
+                    responses2, query, config.preferred_format, config.min_bitrate,
+                    config.min_bit_depth, artist_filter=artist,
+                )
             except Exception:
                 pass
 
@@ -304,7 +316,7 @@ def download_candidates(query: str, candidates: list[dict], config: Config) -> b
         _save_state_and_dashboard(config, state)
 
         if config.verify:
-            from ezsk.verify import check_metadata_match, verify_file
+            from ezsk.verify import verify_file
 
             result = verify_file(
                 output_path, config.min_bitrate, config.min_bit_depth,
@@ -316,6 +328,9 @@ def download_candidates(query: str, candidates: list[dict], config: Config) -> b
                 )
                 os.remove(output_path)
                 continue
+
+        if config.strict_metadata_check:
+            from ezsk.verify import check_metadata_match
 
             meta_error = check_metadata_match(output_path, query)
             if meta_error:
@@ -339,7 +354,8 @@ def download_candidates(query: str, candidates: list[dict], config: Config) -> b
         except OSError:
             pass
 
-        print_status(f"Saved: {output_path}")
+        source_basename = os.path.basename(filename.replace("\\", "/"))
+        print_status(f"Saved: {output_path} (from: {source_basename})")
         return True
 
     state = load_state(config.state_file)

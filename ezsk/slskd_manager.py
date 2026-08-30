@@ -1,6 +1,5 @@
 """Manage a local slskd process — download, configure, start, stop.
 
-Replaces the Docker-based approach with direct binary management.
 Downloads the platform-appropriate slskd release from GitHub on first
 run and caches it in the ezsk data directory.
 """
@@ -10,6 +9,7 @@ import atexit
 import os
 import platform
 import secrets
+import shutil
 import signal
 import stat
 import subprocess
@@ -149,7 +149,9 @@ def download_slskd(verbose: bool = False) -> Path:
     tag, url = _latest_release()
     bin_path = _bin_dir() / ("slskd.exe" if platform.system() == "Windows" else "slskd")
 
-    if bin_path.exists() and installed_version() == tag:
+    # wwwroot is checked too: an install missing it will not start, and
+    # earlier versions of this function extracted only the binary.
+    if bin_path.exists() and installed_version() == tag and (_bin_dir() / "wwwroot").is_dir():
         print_verbose(f"slskd {tag} already installed", verbose)
         return bin_path
 
@@ -176,22 +178,27 @@ def download_slskd(verbose: bool = False) -> Path:
         if total:
             print()  # newline after progress
 
-    # Extract binary
+    # Extract the whole release, not just the binary: slskd resolves wwwroot,
+    # config, and etc relative to the binary's own directory and refuses to
+    # start without them.
     print_status("Extracting slskd...")
     extract_dir = _bin_dir() / "extract"
+    shutil.rmtree(extract_dir, ignore_errors=True)
     with zipfile.ZipFile(zip_path) as zf:
         zf.extractall(extract_dir)
 
-    # Find the binary in the extracted files
     binary_name = "slskd.exe" if platform.system() == "Windows" else "slskd"
-    extracted_binary = extract_dir / binary_name
-    if not extracted_binary.exists():
+    if not (extract_dir / binary_name).exists():
         raise RuntimeError(f"Binary {binary_name} not found in release zip")
 
-    # Move binary to final location
-    if bin_path.exists():
-        bin_path.unlink()
-    extracted_binary.rename(bin_path)
+    # Move the release contents alongside the binary
+    for item in extract_dir.iterdir():
+        dest = _bin_dir() / item.name
+        if dest.is_dir():
+            shutil.rmtree(dest)
+        elif dest.exists():
+            dest.unlink()
+        item.rename(dest)
 
     # Make executable on Unix
     if platform.system() != "Windows":
@@ -201,7 +208,6 @@ def download_slskd(verbose: bool = False) -> Path:
     _installed_version_path().write_text(tag)
 
     # Clean up
-    import shutil
     shutil.rmtree(extract_dir, ignore_errors=True)
     zip_path.unlink(missing_ok=True)
 

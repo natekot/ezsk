@@ -4,6 +4,18 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
+## [Unreleased]
+
+### Removed
+- Docker-based slskd management (`--docker`, `ezsk/docker.py`, the `docker`
+  install extra, and the Docker option in `ezsk --setup`). Use `--managed` for
+  an ezsk-managed slskd, or point `[slskd] url`/`api_key` at your own instance.
+
+### Changed
+- `soulseek_username` moved from the `[docker]` section to `[slskd]` in
+  `config.toml`. Existing configs are still read from `[docker]` for
+  compatibility.
+
 ## [0.1.0] - 2025-04-14
 
 ### Added
