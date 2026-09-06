@@ -119,8 +119,21 @@ class SlskdClient:
                 break
             time.sleep(2)
         else:
+            # A busy query keeps receiving results, so slskd pushes its search
+            # timeout out and the search is still running when we give up on
+            # it. Stop it explicitly -- slskd serves no responses for an active
+            # search, and needs a moment after the stop before they appear.
             self.stop_search(search_id)
-        responses = self.get_search_responses(search_id)
+
+        responses = []
+        for _ in range(15):
+            try:
+                responses = self.get_search_responses(search_id)
+            except Exception:
+                break
+            if responses:
+                break
+            time.sleep(0.2)
         self.delete_search(search_id)
         return search_id, responses
 
