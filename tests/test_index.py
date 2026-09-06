@@ -211,3 +211,71 @@ def test_index_remove_missing_key_is_noop(tmp_path):
     index_remove(idx, str(tmp_path), "Nothing Here - Absent")
     assert idx == {"a b": "/some/path.flac"}
     assert not (tmp_path / ".ezsk_index.json").exists()
+
+
+# ---------- stale entries (files that left the library) ----------
+
+
+def test_find_in_index_skips_entry_whose_file_is_gone(tmp_path):
+    """An index entry pointing at a deleted file must not count as a match.
+
+    Files leave the library after they are indexed -- moved into a music
+    collection, renamed, deleted. A hit on such an entry made search_song mark
+    the query "completed" without ever downloading anything.
+    """
+    track = tmp_path / "Alaska - Accuse.flac"
+    _touch(track)
+    idx = build_index(str(tmp_path))
+    assert find_in_index(idx, "Alaska - Accuse") == str(track)
+
+    track.unlink()
+
+    assert find_in_index(idx, "Alaska - Accuse") is None
+
+
+def test_find_in_index_stale_entry_does_not_mask_a_live_one(tmp_path):
+    """A missing file must not shadow a real copy of the same track.
+
+    The scan has to continue past a stale hit rather than give up on it -- the
+    same track often sits in the library under a different name.
+    """
+    gone = tmp_path / "Omar S;Diviniti - Games That We Play.flac"
+    live = tmp_path / "Omar S - Games That We Play.flac"
+    _touch(gone)
+    _touch(live)
+    gone.unlink()
+
+    # Built by hand so the stale entry is iterated first, not by dict luck.
+    idx = {
+        "omar s diviniti games that we play": str(gone),
+        "omar s games that we play": str(live),
+    }
+
+    assert find_in_index(idx, "Omar S - Games That We Play") == str(live)
+
+
+def test_check_queries_treats_a_gone_file_as_missing(tmp_path):
+    """The /api/files check endpoint must not claim we own a deleted file."""
+    track = tmp_path / "J Lloyd - If I Fall Under.flac"
+    _touch(track)
+    idx = build_index(str(tmp_path))
+    track.unlink()
+
+    have, missing = check_queries(idx, ["J Lloyd - If I Fall Under"])
+
+    assert have == []
+    assert missing == ["J Lloyd - If I Fall Under"]
+
+
+def test_find_in_index_does_not_mutate_the_index(tmp_path):
+    """Lookups stay pure -- pruning here would wipe the index on an unmounted volume."""
+    track = tmp_path / "Alaska - Accuse.flac"
+    _touch(track)
+    idx = build_index(str(tmp_path))
+    track.unlink()
+    before = dict(idx)
+
+    find_in_index(idx, "Alaska - Accuse")
+
+    assert idx == before
+    assert not (tmp_path / ".ezsk_index.json").exists()

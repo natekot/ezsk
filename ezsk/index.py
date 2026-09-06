@@ -120,13 +120,24 @@ def _token_containment(s1: str, s2: str) -> float:
 
 
 def find_in_index(index: dict[str, str], query: str, threshold: float = 0.85) -> str | None:
-    """Return path of first index entry fuzzy-matching query above threshold, or None."""
+    """Return path of the first index entry that fuzzy-matches query above
+    threshold *and still exists on disk*, or None.
+
+    Files leave the library after they were indexed -- moved into a music
+    collection, renamed, deleted -- and the persisted index keeps pointing at
+    them. Callers treat a hit as "already downloaded", so an unchecked path
+    marks a track complete that was never fetched. Keep scanning past a stale
+    hit rather than giving up: the same track is often present under a
+    different name. Purely a read -- pruning here would wipe the index whenever
+    the library sits on an unmounted volume; `--reindex` and
+    POST /api/library/rescan rebuild it deliberately.
+    """
     key = _normalize_for_index(query)
     tokens = key.split()
     if len(tokens) < MIN_TOKENS:
         return None  # too short to match reliably
     for indexed_key, path in index.items():
-        if _token_containment(key, indexed_key) >= threshold:
+        if _token_containment(key, indexed_key) >= threshold and os.path.exists(path):
             return path
     return None
 
