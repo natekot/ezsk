@@ -129,6 +129,31 @@ ezsk -f playlist.csv -c "{artist} - {title}"
 ezsk -f tracks.txt -n 10
 ```
 
+### Excluding unwanted versions
+
+Soulseek is full of instrumentals, karaoke tracks and live cuts filed under the
+same artist and title as the real thing. Add a `no:` term to any query to drop
+results whose path contains that word:
+
+```bash
+ezsk "Talking Heads - Once in a Lifetime no:instrumental"
+ezsk "Tom Tom Club - Genius of Love no:karaoke no:\"radio edit\""
+```
+
+- Matching is whole-word and case-insensitive, so `no:live` will not reject
+  *Olive Oil*.
+- A trailing `s` is tolerated, so `no:instrumental` also catches a
+  *2001 Instrumentals Only* folder. The flip side: `no:live` will also reject a
+  title containing *Lives*.
+- It matches the whole remote path, so a `Karaoke Hits 1998\` folder is caught
+  even when the file name looks clean.
+- Use quotes for phrases: `no:"radio edit"`.
+
+The term works anywhere a query is typed -- the CLI, a text or CSV file, the web
+UI's Add Queries box, and the Replace dialog. It is stripped before the search is
+sent to slskd and before the output file is named, so it never ends up in a
+filename.
+
 ### Parallel downloads
 
 Downloads run with 2 parallel workers by default, with rate-limited searches to avoid overwhelming slskd.

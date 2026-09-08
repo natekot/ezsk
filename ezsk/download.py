@@ -21,7 +21,7 @@ from ezsk.display import (
 from ezsk.index import find_in_index, index_add
 from ezsk.normalize import normalize_query, query_hash
 from ezsk.output import format_output_path
-from ezsk.queryvariants import clean_query, strip_suffix
+from ezsk.queryvariants import clean_query, split_excludes, strip_suffix
 from ezsk.search import rank_results
 from ezsk.state import is_completed, is_exhausted, load_state, save_state, update_entry
 
@@ -128,8 +128,13 @@ def search_song(query: str, config: Config, client: SlskdClient) -> list[dict] |
     if is_completed(state, query):
         print_status(f"Already downloaded: {query}")
         return None
+    # `query` stays the raw line the user typed -- it is the state key, so state
+    # entries, the dashboard and queued.txt must all keep it. `query_text` is the
+    # same line with the `no:...` tokens removed, and is what gets treated as
+    # content: searched for, scored against, and used to name the output file.
+    query_text, excludes = split_excludes(query)
     if config.index is not None:
-        existing = find_in_index(config.index, query)
+        existing = find_in_index(config.index, query_text)
         if existing:
             print_status(f"Found in index: {existing}")
             update_entry(state, query, status="completed", local_path=existing)
@@ -140,7 +145,7 @@ def search_song(query: str, config: Config, client: SlskdClient) -> list[dict] |
     _save_state_and_dashboard(config, state)
 
     use_ai = bool(config.anthropic_api_key)
-    cleaned = clean_query(query)
+    cleaned = clean_query(query_text)
     simplified = normalize_query(cleaned)
     parts = cleaned.split(" - ", 1)
     has_artist = len(parts) == 2
@@ -168,8 +173,8 @@ def search_song(query: str, config: Config, client: SlskdClient) -> list[dict] |
         print_verbose(f"Title-only search returned {len(responses)} users, {total_files} files", config.verbose)
 
         candidates = rank_results(
-            responses, query, config.preferred_format, config.min_bitrate,
-            config.min_bit_depth, artist_filter=artist,
+            responses, query_text, config.preferred_format, config.min_bitrate,
+            config.min_bit_depth, artist_filter=artist, exclude_words=excludes,
         )
         if candidates:
             print_verbose(f"Title-only search: {len(candidates)} candidates after artist filter", config.verbose)
@@ -193,8 +198,8 @@ def search_song(query: str, config: Config, client: SlskdClient) -> list[dict] |
         print_verbose(f"Full search returned {len(responses)} users, {total_files} files", config.verbose)
 
         candidates = rank_results(
-            responses, query, config.preferred_format, config.min_bitrate,
-            config.min_bit_depth, artist_filter=artist,
+            responses, query_text, config.preferred_format, config.min_bitrate,
+            config.min_bit_depth, artist_filter=artist, exclude_words=excludes,
         )
 
     # Fallback: try with remix/version suffixes stripped
@@ -205,8 +210,9 @@ def search_song(query: str, config: Config, client: SlskdClient) -> list[dict] |
             try:
                 _search_id2, responses2 = _smart_search(client, normalize_query(variant), config)
                 candidates = rank_results(
-                    responses2, query, config.preferred_format, config.min_bitrate,
-                    config.min_bit_depth, artist_filter=artist,
+                    responses2, query_text, config.preferred_format,
+                    config.min_bitrate, config.min_bit_depth,
+                    artist_filter=artist, exclude_words=excludes,
                 )
             except Exception:
                 pass
@@ -216,7 +222,7 @@ def search_song(query: str, config: Config, client: SlskdClient) -> list[dict] |
         from ezsk.ai_match import match_results
         try:
             filenames = [c["filename"] for c in candidates[:20]]  # cap to control cost
-            matching = match_results(query, filenames, config.anthropic_api_key)
+            matching = match_results(query_text, filenames, config.anthropic_api_key)
             if matching:
                 candidates = [candidates[i] for i in matching]
                 print_verbose(f"AI matched {len(candidates)} of {len(filenames)} candidates", config.verbose)
@@ -249,6 +255,9 @@ def search_song(query: str, config: Config, client: SlskdClient) -> list[dict] |
 def download_candidates(query: str, candidates: list[dict], config: Config) -> bool:
     """Download a song from a list of ranked candidates. Returns True on success."""
     client = SlskdClient(config)
+    # See search_song: raw `query` keys the state, `query_text` names the file
+    # and is what the downloaded tags are checked against.
+    query_text, _ = split_excludes(query)
 
     for i, candidate in enumerate(candidates):
         username = candidate["username"]
@@ -302,7 +311,7 @@ def download_candidates(query: str, candidates: list[dict], config: Config) -> b
             continue
 
         output_path = format_output_path(
-            config.output_dir, config.output_pattern, query, filename
+            config.output_dir, config.output_pattern, query_text, filename
         )
         Path(output_path).parent.mkdir(parents=True, exist_ok=True)
         shutil.copy2(local_src, output_path)
@@ -332,14 +341,14 @@ def download_candidates(query: str, candidates: list[dict], config: Config) -> b
         if config.strict_metadata_check:
             from ezsk.verify import check_metadata_match
 
-            meta_error = check_metadata_match(output_path, query)
+            meta_error = check_metadata_match(output_path, query_text)
             if meta_error:
                 print_error(f"Rejected: {os.path.basename(filename)} — {meta_error}")
                 os.remove(output_path)
                 continue
 
         if config.index is not None:
-            index_add(config.index, config.output_dir, query, output_path)
+            index_add(config.index, config.output_dir, query_text, output_path)
 
         state = load_state(config.state_file)
         update_entry(

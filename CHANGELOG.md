@@ -6,6 +6,14 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+### Added
+- Inline exclusion terms in queries: `no:instrumental`, `no:live`,
+  `no:"radio edit"`. Results whose remote path contains the term are dropped
+  from the ranking. Matching is whole-word, case-insensitive, and covers the
+  full path (so a `Karaoke Hits` folder is caught). Works from the CLI, track
+  files, the web UI queue box and the Replace dialog; the term is stripped
+  before the search is sent to slskd and before the output file is named.
+
 ### Removed
 - Docker-based slskd management (`--docker`, `ezsk/docker.py`, the `docker`
   install extra, and the Docker option in `ezsk --setup`). Use `--managed` for

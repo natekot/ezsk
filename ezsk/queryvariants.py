@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import re
 
+from ezsk.normalize import normalize_query
+
 # Junk suffixes that add noise to Soulseek searches. These appear after
 # the song title as " - Suffix" or in parentheses/brackets.
 _JUNK_SUFFIXES = re.compile(
@@ -67,3 +69,32 @@ def strip_suffix(query: str) -> str | None:
     if stripped and stripped != title:
         return f"{artist} - {stripped}"
     return None
+
+
+# Inline exclusion tokens: `no:word` or `no:"some phrase"`. The `no:` must be
+# preceded by whitespace or line start and followed immediately by a non-space
+# character. A bare `-word` token was considered and rejected -- "artist -title"
+# is a real shape in scraped and hand-typed lists, so a hyphen token would
+# silently eat half of those queries. `no:` collides with nothing: not the
+# " - " artist/title separator, not hyphenated names (Jay-Z), not trailing
+# punctuation (Wham!), and not incidental colons (Sunday 1:15).
+_EXCLUDE_TOKEN = re.compile(r'(?:^|\s)no:(?:"([^"]+)"|(\S+))', re.IGNORECASE)
+
+
+def split_excludes(query: str) -> tuple[str, list[str]]:
+    """Split inline `no:word` / `no:"some phrase"` tokens out of a query.
+
+    Returns (query with the tokens removed, normalized exclusion terms). The
+    terms are normalized here because `score_file` matches them against a
+    `normalize_query`-normalized path -- an un-normalized "radio edit" or an
+    accented term would never line up with the haystack.
+    """
+    terms: list[str] = []
+    for phrase, word in _EXCLUDE_TOKEN.findall(query):
+        term = normalize_query(phrase or word)
+        if term:
+            terms.append(term)
+    if not terms:
+        return query, []
+    stripped = re.sub(r"\s+", " ", _EXCLUDE_TOKEN.sub("", query)).strip()
+    return stripped, list(dict.fromkeys(terms))

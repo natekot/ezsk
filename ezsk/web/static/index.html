@@ -59,7 +59,7 @@
 <!-- Add Queries Panel -->
 <div class="panel" id="add-panel">
   <h2>Add Queries <button class="panel-close" onclick="togglePanel('add-panel')">&times;</button></h2>
-  <textarea id="query-input" placeholder="One query per line, e.g.&#10;Daft Punk - Around the World&#10;Riva Starr - How It Feels"></textarea>
+  <textarea id="query-input" placeholder="One query per line, e.g.&#10;Daft Punk - Around the World&#10;Riva Starr - How It Feels&#10;&#10;Add no:instrumental to skip unwanted versions."></textarea>
   <div style="margin-top:0.75rem">
     <button class="btn btn-success" onclick="submitQueries()">Start</button>
   </div>
@@ -78,7 +78,7 @@
 <div id="replace-modal" style="display:none; position:fixed; top:0; left:0; width:100%; height:100%; background:rgba(0,0,0,0.5); z-index:1000; align-items:center; justify-content:center;">
   <div class="replace-dialog">
     <p class="replace-title">Replace track</p>
-    <p class="replace-hint">Edit the search query if needed. The current file will be deleted and a new copy downloaded.</p>
+    <p class="replace-hint">Edit the search query if needed. The current file will be deleted and a new copy downloaded.<br>Got the wrong version? Add <code>no:instrumental</code>, <code>no:live</code>, or <code>no:"radio edit"</code> to rule it out.</p>
     <input id="replace-input" type="text" autocomplete="off" spellcheck="false">
     <div class="replace-actions">
       <button class="btn" onclick="cancelReplace()">Cancel</button>
@@ -96,7 +96,7 @@
     <button class="btn btn-success" onclick="welcomeSearch()">Download</button>
   </div>
   <div class="welcome-divider"><span>or paste a list of songs</span></div>
-  <textarea id="welcome-textarea" placeholder="One song per line, e.g.&#10;Daft Punk - Around the World&#10;Riva Starr - How It Feels&#10;Townes Van Zandt - Dead Flowers"></textarea>
+  <textarea id="welcome-textarea" placeholder="One song per line, e.g.&#10;Daft Punk - Around the World&#10;Riva Starr - How It Feels&#10;Townes Van Zandt - Dead Flowers&#10;&#10;Add no:instrumental to skip unwanted versions."></textarea>
   <button class="btn btn-success" onclick="welcomeBatch()" style="margin-top:0.75rem">Download All</button>
   <p class="welcome-hint">You can also drag playlist files onto the Files panel above.</p>
 </div>

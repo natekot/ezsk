@@ -159,3 +159,103 @@ def test_score_file_rejects_non_audio_extension():
     assert score_file(
         {"filename": "cover.jpg"}, {}, "Artist - Title",
     ) == -1
+
+
+# ---------- exclusion terms ----------
+
+
+def test_score_file_rejects_excluded_word_in_filename():
+    """A term typed as no:instrumental drops the result outright."""
+    assert score_file(
+        {"filename": "Artist - Song (Instrumental).mp3", "bitRate": 1000},
+        {}, "Artist - Song", exclude_words=["instrumental"],
+    ) == -1
+
+
+def test_score_file_rejects_excluded_word_in_parent_folder():
+    """Junk is often only in the folder name, not the file name."""
+    assert score_file(
+        {"filename": "@@abc\\Karaoke Hits 1998\\Artist - Song.mp3", "bitRate": 1000},
+        {}, "Artist - Song", exclude_words=["karaoke"],
+    ) == -1
+
+
+def test_score_file_matches_excluded_phrase():
+    """no:"radio edit" excludes the phrase, not either word alone."""
+    file = {"filename": "Artist - Song (Radio Edit).mp3", "bitRate": 1000}
+    assert score_file(file, {}, "Artist - Song", exclude_words=["radio edit"]) == -1
+    assert score_file(file, {}, "Artist - Song", exclude_words=["studio edit"]) >= 0
+
+
+def test_score_file_exclusion_respects_word_boundaries():
+    """'live' must not reject 'Olive Oil' or 'Delivery'."""
+    assert score_file(
+        {"filename": "Olive Oil - Delivery.mp3", "bitRate": 1000},
+        {}, "Olive Oil - Delivery", exclude_words=["live"],
+    ) >= 0
+
+
+def test_rank_results_drops_excluded_candidate():
+    """Given both versions from one user, only the clean one survives."""
+    responses = [{
+        "username": "u1",
+        "hasFreeUploadSlot": True,
+        "uploadSpeed": 1_000_000,
+        "queueLength": 0,
+        "files": [
+            {"filename": "Talking Heads - Once in a Lifetime.mp3",
+             "size": 1_000_000, "bitRate": 1000},
+            {"filename": "Talking Heads - Once in a Lifetime (Instrumental).mp3",
+             "size": 1_000_000, "bitRate": 1000},
+        ],
+    }]
+    candidates = rank_results(
+        responses, "Talking Heads - Once in a Lifetime",
+        artist_filter="Talking Heads", exclude_words=["instrumental"],
+    )
+    assert [c["filename"] for c in candidates] == [
+        "Talking Heads - Once in a Lifetime.mp3"
+    ]
+
+
+def test_rank_results_without_exclusions_keeps_both():
+    """Omitting exclude_words preserves the existing behavior exactly."""
+    responses = [_make_response("u1", "Artist - Song (Instrumental).mp3")]
+    assert len(rank_results(responses, "Artist - Song")) == 1
+
+
+def test_score_file_exclusion_matches_plural_form():
+    """Real paths say "2001 Instrumentals Only" -- the singular term must catch it.
+
+    Found against live Soulseek data: 22 of 1353 surviving candidates for
+    'Dr. Dre - Still D.R.E. no:instrumental' were instrumental albums that
+    slipped through purely on the trailing 's'.
+    """
+    assert score_file(
+        {"filename": "storage\\Dr. Dre Instrumentals Only 2001\\04 Still D.R.E..flac",
+         "bitRate": 1000},
+        {}, "Dr. Dre - Still D.R.E.", exclude_words=["instrumental"],
+    ) == -1
+
+
+def test_score_file_exclusion_plural_does_not_match_unrelated_prefix():
+    """Only a trailing 's' is tolerated, not an arbitrary suffix."""
+    assert score_file(
+        {"filename": "Artist - Instrumentation Study.mp3", "bitRate": 1000},
+        {}, "Artist - Instrumentation Study", exclude_words=["instrumental"],
+    ) >= 0
+
+
+def test_score_file_exclusion_plural_is_blunt_by_design():
+    """The trailing-'s' allowance also catches "Lives" for no:live.
+
+    Pinned deliberately: the plural tolerance is what makes no:instrumental
+    catch "Instrumentals Only" folders, and that is worth the rare false
+    positive on a title like "Our Lives". Do not "fix" this without also
+    handling the folder case that test_score_file_exclusion_matches_plural_form
+    covers.
+    """
+    assert score_file(
+        {"filename": "The Calling - Our Lives.mp3", "bitRate": 1000},
+        {}, "The Calling - Our Lives", exclude_words=["live"],
+    ) == -1

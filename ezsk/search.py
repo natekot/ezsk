@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import math
 import os
+import re
 
 from ezsk.matching import (
     is_various_artists,
@@ -89,14 +90,33 @@ def _title_coverage_ok(filename: str, query: str) -> bool:
     return (matches / len(significant)) >= _TITLE_MIN_RATIO
 
 
+def _is_excluded(filepath: str, exclude_words: list[str]) -> bool:
+    """True if the remote path contains any user-supplied exclusion term.
+
+    Matched against the *full* path rather than the basename: junk is often only
+    named in the folder ("2001 Instrumentals Only\\04 Still D.R.E..flac"). Terms
+    are word-bounded so `no:live` does not reject "Olive", with a tolerated
+    trailing "s" because these words show up pluralized on album folders far more
+    often than in track names. That plural allowance is deliberate and slightly
+    blunt -- `no:live` will also reject a title containing "Lives".
+    """
+    haystack = normalize_query(filepath)
+    return any(
+        re.search(rf"\b{re.escape(w)}s?\b", haystack) for w in exclude_words
+    )
+
+
 def score_file(
     file: dict, user: dict, query: str, preferred_format: str = "flac",
     min_bitrate: int = 320, min_bit_depth: int = 16,
-    artist_filter: str = "",
+    artist_filter: str = "", exclude_words: list[str] | None = None,
 ) -> float:
     filename = file.get("filename", "")
     ext = _ext(filename)
     if ext not in AUDIO_EXTENSIONS:
+        return -1
+
+    if exclude_words and _is_excluded(filename, exclude_words):
         return -1
 
     bitrate = file.get("bitRate", 0)
@@ -153,13 +173,17 @@ def score_file(
 def rank_results(
     responses: list[dict], query: str, preferred_format: str = "flac",
     min_bitrate: int = 320, min_bit_depth: int = 16,
-    artist_filter: str = "",
+    artist_filter: str = "", exclude_words: list[str] | None = None,
 ) -> list[dict]:
     candidates = []
     for user_response in responses:
         username = user_response.get("username", "")
         for f in user_response.get("files", []):
-            s = score_file(f, user_response, query, preferred_format, min_bitrate, min_bit_depth, artist_filter=artist_filter)
+            s = score_file(
+                f, user_response, query, preferred_format, min_bitrate,
+                min_bit_depth, artist_filter=artist_filter,
+                exclude_words=exclude_words,
+            )
             if s < 0:
                 continue
             candidates.append({

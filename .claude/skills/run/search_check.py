@@ -9,6 +9,7 @@ import time
 
 from ezsk.client import SlskdClient
 from ezsk.config import Config
+from ezsk.queryvariants import split_excludes
 from ezsk.search import rank_results
 
 DEFAULT_QUERY = "Radiohead Creep"
@@ -16,13 +17,18 @@ ATTEMPTS = 3
 
 
 def main() -> int:
-    query = " ".join(sys.argv[1:]) or DEFAULT_QUERY
+    raw_query = " ".join(sys.argv[1:]) or DEFAULT_QUERY
+    # Mirror search_song: no:... terms are ezsk syntax, stripped before the
+    # search is sent and applied as a hard filter during ranking.
+    query, excludes = split_excludes(raw_query)
     config = Config.from_file()
     config.apply_env()
 
     client = SlskdClient(config)
     client.check_connection()
     print(f"query: {query!r}")
+    if excludes:
+        print(f"excluding: {excludes}")
 
     # A freshly started slskd has not joined the distributed network yet and
     # returns nothing for a few seconds, so retry before believing a zero.
@@ -42,6 +48,7 @@ def main() -> int:
         preferred_format=config.preferred_format,
         min_bitrate=config.min_bitrate,
         min_bit_depth=config.min_bit_depth,
+        exclude_words=excludes,
     )
     print(f"ranked candidates: {len(ranked)}")
 
