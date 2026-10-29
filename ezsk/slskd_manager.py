@@ -14,6 +14,7 @@ import signal
 import stat
 import subprocess
 import sys
+import threading
 import time
 import zipfile
 from pathlib import Path
@@ -409,3 +410,35 @@ def ensure_running(config: Config) -> None:
     """Start slskd if not already running, wait until healthy."""
     start(config, verbose=config.verbose)
     wait_for_healthy(config)
+
+
+_recover_lock = threading.Lock()
+
+
+def recover(config: Config) -> bool:
+    """Bring a managed slskd back after it has gone away. True if it is up.
+
+    Called by search workers that just got "connection refused". slskd dies
+    outright under memory pressure ("Out of memory." as the last line of its
+    log), and without this the run carried on failing every search against
+    a server that no longer existed. Only an slskd this process started is
+    restarted -- one run by someone else is theirs to bring back.
+
+    Serialised, so when several workers notice at once the first restarts it
+    and the rest find it already healthy.
+    """
+    with _recover_lock:
+        if _process is None:
+            return False
+        rc = _process.poll()
+        if rc is not None:
+            print_error(
+                f"slskd exited (code {rc}), restarting. "
+                f"Log: {_slskd_app_dir() / 'slskd.log'}"
+            )
+        try:
+            ensure_running(config)
+        except Exception as e:
+            print_error(f"Could not restart slskd: {e}")
+            return False
+        return True

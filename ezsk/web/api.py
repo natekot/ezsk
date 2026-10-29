@@ -26,6 +26,18 @@ def _spawn(coro) -> asyncio.Task:
     return task
 
 
+async def _on_demand(app_state: "AppState", fn, *args):
+    """Run a one-off search/download on the service's own worker pool.
+
+    Not asyncio.to_thread: searches now queue behind a process-wide gate two
+    wide, so a handful of these would sit on asyncio's default executor for
+    minutes and starve everything else that needs a thread there -- including
+    the to_thread call that starts a batch. Awaiting a future from a separate
+    pool keeps the waiting off the shared executor.
+    """
+    return await asyncio.wrap_future(app_state.service.ondemand_pool().submit(fn, *args))
+
+
 async def index(request: Request) -> FileResponse:
     app_state: AppState = request.app.state.app_state
     if app_state.needs_setup:
@@ -87,11 +99,18 @@ async def post_run(request: Request) -> JSONResponse:
     from ezsk.download import _append_to_queue
     from ezsk.state import load_state, is_completed
 
-    # Filter already-completed queries.
+    # Filter already-completed queries, and say which ones and where they
+    # are: a bare count of 0 reads as "nothing happened".
+    from ezsk.normalize import query_hash
+
     state = await asyncio.to_thread(load_state, app_state.config.state_file)
     new_queries = [q for q in queries if not is_completed(state, q)]
+    already = [
+        {"query": q, "local_path": state[query_hash(q)].get("local_path", "")}
+        for q in queries if is_completed(state, q)
+    ]
     if not new_queries:
-        return JSONResponse({"ok": True, "count": 0})
+        return JSONResponse({"ok": True, "count": 0, "already": already})
 
     # Persist immediately so queries appear in the UI before the batch starts.
     queue_path = os.path.join(app_state.config.output_dir, "queued.txt")
@@ -110,12 +129,12 @@ async def post_run(request: Request) -> JSONResponse:
     # Spawn each query as an independent on-demand task so it runs immediately
     # regardless of whether a background batch is already in progress.
     async def _run_on_demand(query: str) -> None:
-        await asyncio.to_thread(app_state.service.run_single, query)
+        await _on_demand(app_state, app_state.service.run_single, query)
 
     for q in new_queries:
         _spawn(_run_on_demand(q))
 
-    return JSONResponse({"ok": True, "count": len(new_queries)})
+    return JSONResponse({"ok": True, "count": len(new_queries), "already": already})
 
 
 async def post_retry_one(request: Request) -> JSONResponse:
@@ -127,7 +146,7 @@ async def post_retry_one(request: Request) -> JSONResponse:
         return JSONResponse({"error": "No query provided"}, status_code=400)
 
     async def _run() -> None:
-        await asyncio.to_thread(app_state.service.retry_one, query)
+        await _on_demand(app_state, app_state.service.retry_one, query)
 
     _spawn(_run())
     return JSONResponse({"ok": True})
@@ -147,7 +166,7 @@ async def post_replace(request: Request) -> JSONResponse:
     # replace() resets the entry and save_state() fans the update out to SSE
     # subscribers, so the row reflects the pending re-download on its own.
     async def _run_replace() -> None:
-        await asyncio.to_thread(app_state.service.replace, query, new_query)
+        await _on_demand(app_state, app_state.service.replace, query, new_query)
 
     _spawn(_run_replace())
     return JSONResponse({"ok": True})
@@ -191,8 +210,7 @@ async def events(request: Request) -> None:
             status = app_state.service.get_status()
             status["running"] = app_state.service.running
             yield {"event": "state", "data": json.dumps(status)}
-            files = [f.to_dict() for f in app_state.watch.list_files()]
-            yield {"event": "files", "data": json.dumps({"files": files})}
+            yield {"event": "files", "data": json.dumps(app_state.files_payload())}
 
             while True:
                 try:
@@ -210,10 +228,8 @@ async def events(request: Request) -> None:
 
 async def get_files(request: Request) -> JSONResponse:
     app_state: AppState = request.app.state.app_state
-    files = [f.to_dict() for f in app_state.watch.list_files()]
     return JSONResponse({
-        "files": files,
-        "watch_dir": app_state.config.watch_dir,
+        **app_state.files_payload(),
         "has_api_key": bool(app_state.config.anthropic_api_key),
     })
 
@@ -227,8 +243,7 @@ async def upload_files(request: Request) -> JSONResponse:
 
     form = await request.form()
     uploaded = []
-    for key in form:
-        upload = form[key]
+    for _key, upload in form.multi_items():
         if not hasattr(upload, "read"):
             continue
         name = PurePath(upload.filename or "upload.txt").name

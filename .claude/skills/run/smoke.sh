@@ -33,9 +33,9 @@ else
     echo "no slskd on :$SLSKD_PORT -- starting a managed one"
   fi
 
-  # EZSK_WATCH_DIR= / ANTHROPIC_API_KEY= disable the auto-run download loop.
-  # See SKILL.md "Why the empty env vars".
-  EZSK_WATCH_DIR= ANTHROPIC_API_KEY= \
+  # EZSK_NO_AUTORUN=1 disables the auto-run download loop.
+  # See SKILL.md "Why EZSK_NO_AUTORUN".
+  EZSK_NO_AUTORUN=1 \
     uv run ezsk $MANAGED --serve > "$LOG" 2>&1 &
 
   echo "launching (log: $LOG)"

@@ -154,9 +154,29 @@ UI's Add Queries box, and the Replace dialog. It is stripped before the search i
 sent to slskd and before the output file is named, so it never ends up in a
 filename.
 
-### Parallel downloads
+### Parallel searches and downloads
 
-Downloads run with 2 parallel workers by default, with rate-limited searches to avoid overwhelming slskd.
+A batch runs two stages at once: 2 search workers feeding 4 download workers.
+
+Two searches is a ceiling, not a starting point. slskd forwards only two
+searches at a time to the Soulseek server and queues the rest internally, and
+the server bans you for around 30 minutes if you fire roughly 30 in quick
+succession. Past two you gain no throughput and start losing tracks -- a search
+still sitting in slskd's queue produces nothing, and ezsk would record that as
+"nobody has this" and count it against the track's retry cap.
+
+The cap is process-wide, so it also covers one-off runs started from the web UI
+while a batch is going. Tunables live in the `[search]` section of
+`config.toml`:
+
+```toml
+[search]
+concurrency = 2        # searches open on slskd at once (leave at 2)
+workers = 2            # search threads in a batch
+min_wait = 10          # seconds to keep collecting before an early stop
+timeout = 60           # budget for a search that is returning results
+no_result_timeout = 20 # give up sooner when nobody has answered at all
+```
 
 ### AI-powered search
 

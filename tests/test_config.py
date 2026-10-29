@@ -145,3 +145,45 @@ def test_to_dict_update_from_dict_roundtrip():
     assert c2.min_bitrate == c.min_bitrate
     assert c2.verify == c.verify
     assert c2.title_only_search == c.title_only_search
+
+
+def test_apply_env_overrides_with_set_values(monkeypatch):
+    """A non-empty env var overrides the configured value."""
+    from ezsk.config import Config
+
+    monkeypatch.setenv("EZSK_WATCH_DIR", "/from/env")
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "key-from-env")
+
+    c = Config()
+    c.watch_dir = "/from/config"
+    c.anthropic_api_key = "key-from-config"
+    c.apply_env()
+
+    assert c.watch_dir == "/from/env"
+    assert c.anthropic_api_key == "key-from-env"
+
+
+def test_apply_env_ignores_empty_values(monkeypatch):
+    """An env var that is set but empty must not erase the configured value."""
+    from ezsk.config import Config
+
+    monkeypatch.setenv("EZSK_WATCH_DIR", "")
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "")
+    monkeypatch.setenv("EZSK_SLSKD_URL", "")
+    monkeypatch.setenv("EZSK_SLSKD_API_KEY", "")
+    monkeypatch.setenv("EZSK_SLSKD_DOWNLOADS_DIR", "")
+
+    c = Config(
+        url="http://configured:5030",
+        api_key="api-key-from-config-long-enough",
+        downloads_dir="/downloads/from/config",
+    )
+    c.watch_dir = "/watch/from/config"
+    c.anthropic_api_key = "anthropic-key-from-config"
+    c.apply_env()
+
+    assert c.watch_dir == "/watch/from/config"
+    assert c.anthropic_api_key == "anthropic-key-from-config"
+    assert c.url == "http://configured:5030"
+    assert c.api_key == "api-key-from-config-long-enough"
+    assert c.downloads_dir == "/downloads/from/config"

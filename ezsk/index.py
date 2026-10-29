@@ -2,7 +2,9 @@ from __future__ import annotations
 import json
 import os
 import re
+import threading
 from ezsk.normalize import normalize_query
+from ezsk.paths import atomic_write_text
 
 INDEX_VERSION = 2
 AUDIO_EXTENSIONS = {".flac", ".mp3", ".ogg", ".opus", ".m4a", ".aac", ".wav", ".wma", ".ape", ".alac"}
@@ -10,6 +12,13 @@ MIN_TOKENS = 2  # guard against false positives from single-word queries
 
 # Files we never want to treat as audio even if scanned by accident
 _SKIP_FILES = {".ezsk_index.json", "queued.txt", "dead.txt"}
+
+# config.index is one dict shared by reference across every thread. A download
+# worker calling index_add() while a search worker is partway through
+# find_in_index()'s scan raises "dictionary changed size during iteration", so
+# readers and writers both take this. Reentrant because index_add()/index_remove()
+# call save_index(), which takes it too.
+_index_lock = threading.RLock()
 
 
 def _index_path(output_dir: str) -> str:
@@ -91,21 +100,23 @@ def load_index(output_dir: str) -> dict[str, str]:
 
 def save_index(output_dir: str, index: dict[str, str]) -> None:
     os.makedirs(output_dir, exist_ok=True)
-    path = _index_path(output_dir)
-    with open(path, "w") as f:
-        json.dump({"version": INDEX_VERSION, "entries": index}, f, indent=2)
+    with _index_lock:
+        payload = json.dumps({"version": INDEX_VERSION, "entries": index}, indent=2)
+    atomic_write_text(_index_path(output_dir), payload)
 
 
 def index_add(index: dict[str, str], output_dir: str, query: str, file_path: str) -> None:
     """Add a newly downloaded file to the in-memory index and persist."""
-    index[_normalize_for_index(query)] = file_path
-    save_index(output_dir, index)
+    with _index_lock:
+        index[_normalize_for_index(query)] = file_path
+        save_index(output_dir, index)
 
 
 def index_remove(index: dict[str, str], output_dir: str, query: str) -> None:
     """Drop a query's entry from the in-memory index and persist if changed."""
-    if index.pop(_normalize_for_index(query), None) is not None:
-        save_index(output_dir, index)
+    with _index_lock:
+        if index.pop(_normalize_for_index(query), None) is not None:
+            save_index(output_dir, index)
 
 
 def _token_containment(s1: str, s2: str) -> float:
@@ -136,7 +147,13 @@ def find_in_index(index: dict[str, str], query: str, threshold: float = 0.85) ->
     tokens = key.split()
     if len(tokens) < MIN_TOKENS:
         return None  # too short to match reliably
-    for indexed_key, path in index.items():
+    # Snapshot under the lock rather than scanning the live dict: the scan
+    # stats every candidate path, so it is slow enough that a download worker's
+    # index_add() would otherwise land mid-iteration. Insertion order is
+    # preserved, which callers rely on to reach a stale entry before a live one.
+    with _index_lock:
+        entries = list(index.items())
+    for indexed_key, path in entries:
         if _token_containment(key, indexed_key) >= threshold and os.path.exists(path):
             return path
     return None

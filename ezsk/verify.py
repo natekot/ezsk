@@ -196,11 +196,8 @@ def _primary_artist(artist: str) -> str:
 _MIN_MATCH = 0.6
 
 
-def check_metadata_match(file_path: str, query: str) -> str | None:
-    """Check if the file's embedded tags match the query.
-
-    Returns an error string if the tags indicate a wrong track, None if OK.
-    """
+def read_artist_title(file_path: str) -> tuple[str, str] | None:
+    """The file's (artist, title) tags, or None unless it has both."""
     try:
         import mutagen
     except ImportError:
@@ -213,12 +210,23 @@ def check_metadata_match(file_path: str, query: str) -> str | None:
     if f is None:
         return None
 
-    tag_artist = (f.get("artist", [""])[0] or "").strip()
-    tag_title = (f.get("title", [""])[0] or "").strip()
-
-    # Skip check if tags are missing
-    if not tag_artist or not tag_title:
+    artist = ((f.get("artist") or [""])[0] or "").strip()
+    title = ((f.get("title") or [""])[0] or "").strip()
+    if not artist or not title:
         return None
+    return artist, title
+
+
+def check_metadata_match(file_path: str, query: str) -> str | None:
+    """Check if the file's embedded tags match the query.
+
+    Returns an error string if the tags indicate a wrong track, None if OK.
+    """
+    tags = read_artist_title(file_path)
+    # Skip check if tags are missing
+    if tags is None:
+        return None
+    tag_artist, tag_title = tags
 
     if " - " not in query:
         return None

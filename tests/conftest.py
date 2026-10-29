@@ -34,3 +34,15 @@ def mock_config(tmp_path):
         state_file=str(tmp_path / "state.json"),
         log_file=str(tmp_path / "ezsk.log"),
     )
+
+
+@pytest.fixture(autouse=True)
+def _clear_active_searches():
+    """Keep the process-wide in-flight search set from leaking between tests."""
+    from ezsk import client as client_mod
+
+    with client_mod._active_lock:
+        client_mod._active_searches.clear()
+    yield
+    with client_mod._active_lock:
+        client_mod._active_searches.clear()

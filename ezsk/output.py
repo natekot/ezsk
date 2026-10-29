@@ -20,10 +20,19 @@ def sanitize_filename(name: str) -> str:
 
 
 def format_output_path(
-    output_dir: str, pattern: str, query: str, remote_filename: str
+    output_dir: str, pattern: str, query: str, remote_filename: str,
+    tags: tuple[str, str] | None = None,
 ) -> str:
+    """Where to save a download.
+
+    `tags` is the downloaded file's (artist, title). It names the file only
+    when the query has no "Artist - " part of its own, which would otherwise
+    be filed under "Unknown".
+    """
     ext = os.path.splitext(remote_filename)[1].lstrip(".")
     parts = parse_query(query)
+    if tags and " - " not in query:
+        parts["artist"], parts["title"] = tags
     parts["ext"] = ext
     formatted = pattern.format(**parts)
     formatted = sanitize_filename(formatted)

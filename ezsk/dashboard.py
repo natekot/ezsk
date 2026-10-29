@@ -2,14 +2,41 @@ from __future__ import annotations
 
 import html
 import os
+import threading
 import time
-from pathlib import Path
 
 from ezsk.config import Config
-from ezsk.paths import default_dashboard_path
+from ezsk.paths import atomic_write_text, default_dashboard_path
 from ezsk.state import load_state
 
 DASHBOARD_PATH = str(default_dashboard_path())
+
+# Refresh at most this often from the hot path. See request_dashboard().
+_COALESCE_SECONDS = 1.0
+_throttle_lock = threading.Lock()
+_last_generated = 0.0
+
+
+def request_dashboard(config: Config, *, active: bool = True) -> None:
+    """Refresh the dashboard, at most once a second.
+
+    Every state change used to rewrite the whole HTML page. Two search workers
+    and four download workers -- each download also reporting progress once a
+    second -- turn that into dozens of full renders a second, nearly all of
+    them superseded before anyone could read one.
+
+    Dropping the extras is safe rather than merely cheap: the page reloads
+    itself every five seconds while a run is active, and run_batch calls
+    generate_dashboard() unconditionally when it finishes, so the terminal
+    state is always written.
+    """
+    global _last_generated
+    with _throttle_lock:
+        now = time.monotonic()
+        if now - _last_generated < _COALESCE_SECONDS:
+            return
+        _last_generated = now
+    generate_dashboard(config, active=active)
 
 
 def _fmt_timestamp(iso: str) -> str:
@@ -251,7 +278,7 @@ td.source {{ font-family: ui-monospace, monospace; font-size: 0.8rem; color: var
 </body>
 </html>"""
 
-    Path(DASHBOARD_PATH).parent.mkdir(parents=True, exist_ok=True)
-    with open(DASHBOARD_PATH, "w") as f:
-        f.write(page)
+    # Atomic: every state change rewrites this page, now from several worker
+    # threads at once, and a browser can be fetching it at the same time.
+    atomic_write_text(DASHBOARD_PATH, page)
     return DASHBOARD_PATH

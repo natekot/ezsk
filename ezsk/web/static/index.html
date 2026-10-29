@@ -136,6 +136,7 @@
   var _pendingReplaces = {};
   var _pendingRetries = {};
   var filesData = [];
+  var watchDir = '';
   var fileChecks = {};  // {filename: {have: [...], missing: [...], expanded: bool}}
   var batchTotal = 0;
   var batchRemaining = 0;
@@ -327,7 +328,7 @@
     }).then(function(r) { return r.json(); }).then(function(data) {
       if (data.ok) {
         document.getElementById('welcome-input').value = '';
-        toast('Downloading: ' + q);
+        toast(data.count ? 'Downloading: ' + q : runMessage(data));
       } else { toast(data.error || 'Failed'); }
     });
   };
@@ -343,7 +344,7 @@
     }).then(function(r) { return r.json(); }).then(function(data) {
       if (data.ok) {
         document.getElementById('welcome-textarea').value = '';
-        toast('Started ' + data.count + ' downloads');
+        toast(runMessage(data));
       } else { toast(data.error || 'Failed'); }
     });
   };
@@ -358,7 +359,16 @@
     var badge = document.getElementById('running-badge');
     var cancelBtn = document.getElementById('btn-cancel');
     badge.classList.toggle('active', isRunning);
-    badge.textContent = 'Running';
+    // batch_remaining counts tracks whose search hasn't finished yet, so
+    // `done` is searches resolved — some of those are still downloading.
+    // Searches run two at a time and finish out of order, so this climbs
+    // unevenly. 0 on the on-demand run_single path (Add Queries / Replace /
+    // Retry One), which isn't a batch.
+    var done = batchTotal - batchRemaining;
+    badge.textContent = batchTotal ? 'Running  ' + done + ' / ' + batchTotal : 'Running';
+    badge.title = batchTotal
+      ? done + ' of ' + batchTotal + ' searched (some may still be downloading)'
+      : '';
     cancelBtn.style.display = isRunning ? '' : 'none';
     document.getElementById('btn-retry').disabled = isRunning;
     document.getElementById('btn-run-all').disabled = isRunning;
@@ -466,6 +476,7 @@
     es.addEventListener('files', function(e) {
       var data = JSON.parse(e.data);
       filesData = data.files || [];
+      watchDir = data.watch_dir || '';
       renderFileList();
     });
 
@@ -553,7 +564,7 @@
       body: JSON.stringify({queries: queries})
     }).then(function(r) { return r.json(); }).then(function(data) {
       if (data.ok) {
-        toast('Started ' + data.count + (data.count === 1 ? ' query' : ' queries'));
+        toast(runMessage(data));
         document.getElementById('query-input').value = '';
         togglePanel('add-panel');
         // Force immediate table refresh in case SSE hasn't fired yet.
@@ -591,6 +602,16 @@
     var table = document.getElementById('files-table');
     var empty = document.getElementById('files-empty');
     var body = document.getElementById('files-body');
+    var upload = document.getElementById('files-upload');
+
+    upload.style.display = watchDir ? '' : 'none';
+
+    if (!watchDir) {
+      table.style.display = 'none';
+      empty.style.display = 'block';
+      empty.textContent = 'No watch directory configured \u2014 set "Watch Dir" in Settings to upload files.';
+      return;
+    }
 
     if (!filesData.length) {
       table.style.display = 'none';
@@ -663,17 +684,28 @@
     for (var i = 0; i < files.length; i++) {
       formData.append('files', files[i]);
     }
+    var status = document.getElementById('files-status');
+    status.textContent = '';
     toast('Uploading ' + files.length + ' file' + (files.length > 1 ? 's' : '') + '...');
     fetch('/api/files/upload', {method: 'POST', body: formData})
-      .then(function(r) { return r.json(); })
+      .then(function(r) {
+        return r.json().catch(function() {
+          throw new Error('Upload failed (HTTP ' + r.status + ')');
+        });
+      })
       .then(function(data) {
         if (data.ok) {
           toast('Uploaded ' + data.uploaded.length + ' file' + (data.uploaded.length > 1 ? 's' : ''));
         } else {
-          toast(data.error || 'Upload failed');
+          throw new Error(data.error || 'Upload failed');
         }
-        fileInput.value = '';
-      });
+      })
+      .catch(function(err) {
+        toast(err.message);
+        status.textContent = err.message;
+        status.className = 'error-text';
+      })
+      .then(function() { fileInput.value = ''; });
   }
 
   uploadArea.addEventListener('dragover', function(e) {
@@ -780,6 +812,20 @@
     el.textContent = msg;
     el.classList.add('show');
     setTimeout(function() { el.classList.remove('show'); }, 3000);
+  }
+
+  // What a POST /api/run did. Queries already in the library start nothing,
+  // so name the file instead of reporting "Started 0 queries".
+  function runMessage(data) {
+    var already = data.already || [];
+    var started = data.count
+      ? 'Started ' + data.count + (data.count === 1 ? ' query' : ' queries')
+      : '';
+    if (!already.length) return started || 'Started 0 queries';
+    var skipped = already.length === 1
+      ? 'Already downloaded: ' + (already[0].local_path || already[0].query).split('/').pop()
+      : already.length + ' already downloaded';
+    return started ? started + ' · ' + skipped : skipped;
   }
 })();
 </script>

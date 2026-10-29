@@ -7,6 +7,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 from ezsk.paths import (
+    atomic_write_text,
     default_config_path,
     default_dashboard_path,
     default_downloads_dir,
@@ -34,6 +35,13 @@ verify = false
 min_frequency_cutoff = 19.0
 title_only_search = true
 strict_metadata_check = true
+
+[search]
+concurrency = 2
+workers = 2
+min_wait = 10
+timeout = 60
+no_result_timeout = 20
 
 [anthropic]
 api_key = ""
@@ -64,7 +72,23 @@ class Config:
     soulseek_username: str = ""
     anthropic_api_key: str = ""
     watch_dir: str = ""
+    no_autorun: bool = False  # set by EZSK_NO_AUTORUN; skips the auto-download loop
     index: dict[str, str] | None = None  # populated at runtime by --index flag
+
+    # How many searches this process may have open on slskd at once. Two is a
+    # ceiling, not a default to tune up: slskd forwards only two searches at a
+    # time to the Soulseek server and queues the rest internally, and the
+    # server bans for ~30 minutes if you fire roughly 30 in quick succession.
+    # Past two you buy no throughput and start losing tracks -- a search still
+    # sitting in slskd's queue burns its local deadline, returns nothing, and
+    # is recorded as a genuine miss.
+    search_concurrency: int = 2
+    # Search worker threads in a batch. No point exceeding search_concurrency;
+    # they would just queue on the gate.
+    search_workers: int = 2
+    search_min_wait: int = 10           # min seconds before an early stop is allowed
+    search_timeout: int = 60            # budget for a search that is returning results
+    search_no_result_timeout: int = 20  # give up sooner when nothing has answered at all
 
     def __post_init__(self) -> None:
         if not self.state_file:
@@ -101,17 +125,32 @@ class Config:
             "soulseek_username",
             docker.get("soulseek_username", cfg.soulseek_username),
         )
+        search = data.get("search", {})
+        cfg.search_concurrency = search.get("concurrency", cfg.search_concurrency)
+        cfg.search_workers = search.get("workers", cfg.search_workers)
+        cfg.search_min_wait = search.get("min_wait", cfg.search_min_wait)
+        cfg.search_timeout = search.get("timeout", cfg.search_timeout)
+        cfg.search_no_result_timeout = search.get(
+            "no_result_timeout", cfg.search_no_result_timeout
+        )
         anthropic = data.get("anthropic", {})
         cfg.anthropic_api_key = anthropic.get("api_key", cfg.anthropic_api_key)
         cfg.watch_dir = anthropic.get("watch_dir", cfg.watch_dir)
         return cfg
 
     def apply_env(self) -> None:
-        self.url = os.environ.get("EZSK_SLSKD_URL", self.url)
-        self.api_key = os.environ.get("EZSK_SLSKD_API_KEY", self.api_key)
-        self.downloads_dir = os.environ.get("EZSK_SLSKD_DOWNLOADS_DIR", self.downloads_dir)
-        self.anthropic_api_key = os.environ.get("ANTHROPIC_API_KEY", self.anthropic_api_key)
-        self.watch_dir = os.environ.get("EZSK_WATCH_DIR", self.watch_dir)
+        """Apply env overrides. A var that is set but empty is ignored, so an
+        empty export can't silently erase a configured value."""
+        def env(name: str, current: str) -> str:
+            return os.environ.get(name) or current
+
+        self.url = env("EZSK_SLSKD_URL", self.url)
+        self.api_key = env("EZSK_SLSKD_API_KEY", self.api_key)
+        self.downloads_dir = env("EZSK_SLSKD_DOWNLOADS_DIR", self.downloads_dir)
+        self.anthropic_api_key = env("ANTHROPIC_API_KEY", self.anthropic_api_key)
+        self.watch_dir = env("EZSK_WATCH_DIR", self.watch_dir)
+        if os.environ.get("EZSK_NO_AUTORUN"):
+            self.no_autorun = True
 
     def apply_args(self, args) -> None:
         if args.url:
@@ -173,6 +212,13 @@ class Config:
                 "title_only_search": self.title_only_search,
                 "strict_metadata_check": self.strict_metadata_check,
             },
+            "search": {
+                "concurrency": self.search_concurrency,
+                "workers": self.search_workers,
+                "min_wait": self.search_min_wait,
+                "timeout": self.search_timeout,
+                "no_result_timeout": self.search_no_result_timeout,
+            },
             "anthropic": {
                 "api_key": self.anthropic_api_key,
                 "watch_dir": self.watch_dir,
@@ -218,6 +264,16 @@ class Config:
             self.anthropic_api_key = anthropic["api_key"]
         if "watch_dir" in anthropic:
             self.watch_dir = anthropic["watch_dir"]
+        search = data.get("search", {})
+        for key, attr in (
+            ("concurrency", "search_concurrency"),
+            ("workers", "search_workers"),
+            ("min_wait", "search_min_wait"),
+            ("timeout", "search_timeout"),
+            ("no_result_timeout", "search_no_result_timeout"),
+        ):
+            if key in search:
+                setattr(self, attr, int(search[key]))
 
     def save(self, path: Path | None = None) -> None:
         path = path or DEFAULT_CONFIG_PATH
@@ -235,8 +291,7 @@ class Config:
                 else:
                     lines.append(f'{key} = "{val}"')
             lines.append("")
-        path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text("\n".join(lines))
+        atomic_write_text(path, "\n".join(lines))
 
     def validate(self) -> list[str]:
         errors = []

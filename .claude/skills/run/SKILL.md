@@ -52,18 +52,22 @@ Then open <http://127.0.0.1:8642> and look at it. Logs: `/tmp/ezsk-run.log`.
 ./.claude/skills/run/smoke.sh stop
 ```
 
-## Why the empty env vars
+## Why EZSK_NO_AUTORUN
 
-The script launches with `EZSK_WATCH_DIR= ANTHROPIC_API_KEY=` set to empty.
-**This is a safety interlock, not noise.** `_auto_run_loop`
-(`ezsk/web/app.py:98-173`) is spawned in the lifespan hook and runs its first
-batch *immediately* — it is gated only on `watch_dir` and `anthropic_api_key`
-both being truthy (`app.py:100-101`). The real config sets both, so an
-unguarded `--serve` starts downloading into `~/music/soulseek` within seconds,
-picking up queued entries from `state.json`, `queued.txt`, and every `failed`
-entry past its retry cooldown. `apply_env` uses `os.environ.get(KEY, default)`
-(`ezsk/config.py:108-113`), so an empty string genuinely overrides the TOML
-value and the loop returns at line 100.
+The script launches with `EZSK_NO_AUTORUN=1`. **This is a safety interlock, not
+noise.** `_auto_run_loop` is spawned in the lifespan hook and runs its first
+batch *immediately*. The real config is fully populated, so an unguarded
+`--serve` starts downloading into `~/music/soulseek` within seconds, picking up
+queued entries from `state.json`, `queued.txt`, and every `failed` entry past
+its retry cooldown. `EZSK_NO_AUTORUN=1` makes `autorun_enabled()`
+(`ezsk/web/app.py`) return false, so the loop returns immediately while the
+rest of the UI still works on the real config — the watch dir and its files
+stay visible and uploads still work.
+
+Do **not** substitute `EZSK_WATCH_DIR= ANTHROPIC_API_KEY=` for this. That used
+to work by accident and no longer does: `apply_env` now ignores env vars that
+are set but empty, so those exports leave the real config intact and the
+download loop runs.
 
 To deliberately let it process the queue, run without the prefix:
 

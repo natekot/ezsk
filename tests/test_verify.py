@@ -144,3 +144,31 @@ def test_metadata_match_graceful_when_mutagen_missing(monkeypatch):
     with pytest.MonkeyPatch.context() as _:
         # Use a builtins-level guard: set mutagen to None so `import mutagen` raises
         assert check_metadata_match("/fake/path.flac", "Artist - Title") is None
+
+
+def test_read_artist_title_returns_both_tags(monkeypatch):
+    from ezsk.verify import read_artist_title
+
+    _install_fake_mutagen(monkeypatch, {"artist": [" Tapper Zukie "], "title": ["Visions of Love"]})
+    assert read_artist_title("/fake/path.flac") == ("Tapper Zukie", "Visions of Love")
+
+
+@pytest.mark.parametrize("tags", [
+    {"artist": ["Tapper Zukie"], "title": [""]},
+    {"artist": [""], "title": ["Visions of Love"]},
+    {},
+    None,  # mutagen couldn't parse the file
+])
+def test_read_artist_title_needs_both_tags(monkeypatch, tags):
+    """Half a name is no better than "Unknown" -- callers fall back."""
+    from ezsk.verify import read_artist_title
+
+    _install_fake_mutagen(monkeypatch, tags)
+    assert read_artist_title("/fake/path.flac") is None
+
+
+def test_read_artist_title_without_mutagen(monkeypatch):
+    from ezsk.verify import read_artist_title
+
+    monkeypatch.setitem(sys.modules, "mutagen", None)
+    assert read_artist_title("/fake/path.flac") is None

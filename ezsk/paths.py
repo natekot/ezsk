@@ -10,7 +10,9 @@ On first run, migrates from legacy XDG paths (~/.config/ezsk,
 """
 from __future__ import annotations
 
+import os
 import shutil
+import tempfile
 from pathlib import Path
 
 from platformdirs import user_config_dir, user_data_dir
@@ -79,3 +81,30 @@ def default_downloads_dir() -> Path:
 
 def default_slskd_data_dir() -> Path:
     return data_dir() / "slskd-data"
+
+
+def atomic_write_text(path: str | Path, text: str) -> None:
+    """Write `text` to `path` so readers never see a half-written file.
+
+    Writes a sibling tempfile and renames it over the target -- os.replace is
+    atomic within a filesystem, so a concurrent reader gets either the old file
+    or the new one. state.json, the library index, queued.txt/dead.txt, the
+    dashboard and config.toml are all rewritten whole from several threads, and
+    all of them are read back by the web UI while a batch is running.
+
+    Atomic per write only: it does not make a read-modify-write atomic. Callers
+    that need that must hold a lock across both halves (see state.state_txn).
+    """
+    path = Path(path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    fd, tmp = tempfile.mkstemp(dir=path.parent, suffix=".tmp")
+    try:
+        with os.fdopen(fd, "w") as f:
+            f.write(text)
+        os.replace(tmp, path)
+    except BaseException:
+        try:
+            os.unlink(tmp)
+        except OSError:
+            pass
+        raise
